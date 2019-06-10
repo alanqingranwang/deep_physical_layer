@@ -26,7 +26,7 @@ if USE_CUDA:
 
 for snr in snrs:
     model = Net(2**BLOCK_SIZE, compressed_dim=CHANNEL_USE, snr=snr)
-    model.load_state_dict(torch.load('./models/model_state_'+str(snr)))
+    model.load_state_dict(torch.load('./models/model_state_for_recreating_bler_plot'+str(snr)))
     if USE_CUDA: model = model.cuda()
     test_out = model(test_data)
     pred = torch.argmax(test_out, dim=1)

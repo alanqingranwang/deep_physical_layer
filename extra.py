@@ -15,7 +15,7 @@ NUM_EPOCHS = 300
 BATCH_SIZE = 256
 
 # Comms parameters
-CHANNEL_USE = 2 # The parameter n
+CHANNEL_USE = 7 # The parameter n
 BLOCK_SIZE = 4 # The parameter k
 
 # Torch parameters
@@ -96,7 +96,6 @@ if __name__ == "__main__":
 
         # Training
         snrs_db = np.linspace(-4, 9, num=14)
-        snrs_db = [10]
         for snr in snrs_db:
             loss_list = []
             acc_list = []
@@ -114,38 +113,38 @@ if __name__ == "__main__":
             if USE_CUDA: model = model.cuda()
             optimizer = Adam(model.parameters(), lr=0.001)
 
-            with imageio.get_writer('results/gifs/normalization.gif', mode='I') as writer:
-                for epoch in range(NUM_EPOCHS): 
-                    for batch_idx, (batch, labels) in enumerate(training_loader):
-                        if USE_CUDA:
-                            batch = batch.cuda()
-                            labels = labels.cuda()
-                        output = model(batch)
-                        loss = loss_fn(output, labels)
+            #with imageio.get_writer('results/gifs/normalization.gif', mode='I') as writer:
+            for epoch in range(NUM_EPOCHS): 
+                for batch_idx, (batch, labels) in enumerate(training_loader):
+                    if USE_CUDA:
+                        batch = batch.cuda()
+                        labels = labels.cuda()
+                    output = model(batch)
+                    loss = loss_fn(output, labels)
 
-                        model.zero_grad()
-                        loss.backward()
-                        optimizer.step()
-                        if batch_idx % (BATCH_SIZE-1) == 0:
-                            pred = torch.argmax(output, dim=1)
-                            acc = accuracy(pred, labels)  
-                            print('Epoch %2d for SNR %s: loss=%.4f, acc=%.2f' % (epoch, snr, loss.item(), acc))
-                            loss_list.append(loss.item())
-                            acc_list.append(acc)
+                    model.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+                    if batch_idx % (BATCH_SIZE-1) == 0:
+                        pred = torch.argmax(output, dim=1)
+                        acc = accuracy(pred, labels)  
+                        print('Epoch %2d for SNR %s: loss=%.4f, acc=%.2f' % (epoch, snr, loss.item(), acc))
+                        loss_list.append(loss.item())
+                        acc_list.append(acc)
 
-                            train_data = train_data.cuda()
-                            train_codes = model.encode(train_data)
-                            train_codes = train_codes.cpu().detach().numpy()
-                            fig = plt.figure()
-                            plt.scatter(train_codes[:, 0], train_codes[:, 1])
-                            plt.savefig('results/images/foo'+str(epoch)+'.png')
-                            fig.clf()
-                            plt.close()
-                            image = imageio.imread('results/images/foo'+str(epoch)+'.png')
-                            writer.append_data(image)
+                        train_data = train_data.cuda()
+                        train_codes = model.encode(train_data)
+                        train_codes = train_codes.cpu().detach().numpy()
+                        fig = plt.figure()
+                        plt.scatter(train_codes[:, 0], train_codes[:, 1])
+                        plt.savefig('results/images/bler_plot'+str(epoch)+'.png')
+                        fig.clf()
+                        plt.close()
+                        image = imageio.imread('results/images/bler_plot'+str(epoch)+'.png')
+                        #writer.append_data(image)
 
 
-                torch.save(model.state_dict(), './models/model_state_'+str(snr))
+                torch.save(model.state_dict(), './models/model_state_for_recreating_bler_plot'+str(snr))
 
     else:
         test_labels = (torch.rand(1500) * CHANNEL_SIZE).long()

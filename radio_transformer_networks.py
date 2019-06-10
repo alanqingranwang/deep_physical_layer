@@ -46,9 +46,10 @@ class Net(nn.Module):
         x = self.encoder(x)
 
         # Normalization so that every element of x is normalized. Forces unit amplitude...? question about coding vs modulation
-        x = (x / x.norm(dim=-1)[:, None])
+        #x = (x / x.norm(dim=-1)[:, None])
 
         # Normalization. Forces average power to be equal to n.
+        x = x / x.norm() * 70
 
         return x
 
@@ -110,7 +111,7 @@ if __name__ == "__main__":
             if USE_CUDA: model = model.cuda()
             optimizer = Adam(model.parameters(), lr=0.001)
 
-            with imageio.get_writer('results/gifs/unit_norm_16_snr_'+str(snr)+'.gif', mode='I') as writer:
+            with imageio.get_writer('results/gifs/total_norm_16_snr_'+str(snr)+'.gif', mode='I') as writer:
                 for epoch in range(NUM_EPOCHS): 
                     for batch_idx, (batch, labels) in enumerate(training_loader):
                         if USE_CUDA:
