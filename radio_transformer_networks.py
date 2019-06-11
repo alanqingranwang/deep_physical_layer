@@ -15,14 +15,15 @@ NUM_EPOCHS = 300
 BATCH_SIZE = 256
 
 # Comms parameters
-CHANNEL_USE = 2 # The parameter n
+CHANNEL_USE = 7 # The parameter n
 BLOCK_SIZE = 4 # The parameter k
+NUM_TAPS = 100 # Length of impulse response of bandpass filter
 
 # Torch parameters
 USE_CUDA = True 
 
 class Net(nn.Module):
-    def __init__(self, in_channels, compressed_dim, snr):
+    def __init__(self, in_channels, compressed_dim, snr, num_taps):
         super(Net, self).__init__()
         self.in_channels = in_channels
         self.compressed_dim = compressed_dim
@@ -34,12 +35,13 @@ class Net(nn.Module):
         )
 
         self.decoder = nn.Sequential(
-            nn.Linear(compressed_dim, in_channels),
+            nn.Linear(compressed_dim + num_taps - 1, in_channels),
             nn.LeakyReLU(inplace=True),
             nn.Linear(in_channels, in_channels)
         ) 
+        self.conv1 = nn.Conv1d(1, 1, num_taps, padding=num_taps-1, bias=False)
 
-    def decode_signal(self, x):
+    def decode(self, x):
         return self.decoder(x)
 
     def encode(self, x):
@@ -54,6 +56,7 @@ class Net(nn.Module):
         return x
 
     def forward(self, x):
+        batch_size = len(x)
         x = self.encode(x)
 
         # 7dBW to SNR.
@@ -67,7 +70,14 @@ class Net(nn.Module):
         if USE_CUDA: noise = noise.cuda()
         x += noise
 
-        x = self.decoder(x)
+        x = x.view(batch_size, 1, -1)
+        #print('conv input: ', x.size())
+        x = self.conv1(x) # Represents bandpass filter
+        #print('conv output: ', x.size())
+        x = x.view(batch_size, -1)
+
+        #print('before decoder: ', x.size())
+        x = self.decode(x)
 
         return x
 
@@ -94,6 +104,7 @@ if __name__ == "__main__":
 
         # Training
         snrs_db = np.linspace(-4, 9, num=14)
+        snrs_db = [1]
         for snr in snrs_db:
             loss_list = []
             acc_list = []
@@ -107,42 +118,43 @@ if __name__ == "__main__":
             # use. This is because we wish the autoencoder to learn an optimal
             # coding scheme, so the middle layer should encode a vector of length
             # n.
-            model = Net(2**BLOCK_SIZE, compressed_dim=CHANNEL_USE, snr=snr)
+            model = Net(2**BLOCK_SIZE, compressed_dim=CHANNEL_USE, snr=snr, num_taps=NUM_TAPS)
             if USE_CUDA: model = model.cuda()
             optimizer = Adam(model.parameters(), lr=0.001)
 
-            with imageio.get_writer('results/gifs/total_norm_16_snr_'+str(snr)+'.gif', mode='I') as writer:
-                for epoch in range(NUM_EPOCHS): 
-                    for batch_idx, (batch, labels) in enumerate(training_loader):
-                        if USE_CUDA:
-                            batch = batch.cuda()
-                            labels = labels.cuda()
-                        output = model(batch)
-                        loss = loss_fn(output, labels)
+            #with imageio.get_writer('results/gifs/total_norm_16_snr_'+str(snr)+'.gif', mode='I') as writer:
+            for epoch in range(NUM_EPOCHS): 
+                for batch_idx, (batch, labels) in enumerate(training_loader):
+                    if USE_CUDA:
+                        batch = batch.cuda()
+                        labels = labels.cuda()
+                    output = model(batch)
+                    loss = loss_fn(output, labels)
 
-                        model.zero_grad()
-                        loss.backward()
-                        optimizer.step()
-                        if batch_idx % (BATCH_SIZE-1) == 0:
-                            pred = torch.argmax(output, dim=1)
-                            acc = accuracy(pred, labels)  
-                            print('Epoch %2d for SNR %s: loss=%.4f, acc=%.2f' % (epoch, snr, loss.item(), acc))
-                            loss_list.append(loss.item())
-                            acc_list.append(acc)
+                    model.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+                    if batch_idx % (BATCH_SIZE-1) == 0:
+                        pred = torch.argmax(output, dim=1)
+                        acc = accuracy(pred, labels)  
+                        print('Epoch %2d for SNR %s: loss=%.4f, acc=%.2f' % (epoch, snr, loss.item(), acc))
+                        loss_list.append(loss.item())
+                        acc_list.append(acc)
 
-                            train_data = train_data.cuda()
-                            train_codes = model.encode(train_data)
-                            train_codes = train_codes.cpu().detach().numpy()
-                            fig = plt.figure()
-                            plt.scatter(train_codes[:, 0], train_codes[:, 1])
-                            plt.savefig('results/images/foo'+str(epoch)+'.png')
-                            fig.clf()
-                            plt.close()
-                            image = imageio.imread('results/images/foo'+str(epoch)+'.png')
-                            writer.append_data(image)
+                        #train_data = train_data.cuda()
+                        #train_codes = model.encode(train_data)
+                        #train_codes = train_codes.cpu().detach().numpy()
+                        #fig = plt.figure()
+                        #plt.scatter(train_codes[:, 0], train_codes[:, 1])
+                        #plt.savefig('results/images/foo'+str(epoch)+'.png')
+                        #fig.clf()
+                        #plt.close()
+                        #image = imageio.imread('results/images/foo'+str(epoch)+'.png')
+                        #writer.append_data(image)
 
 
-                torch.save(model.state_dict(), './models/model_state_'+str(snr))
+            torch.save(model.state_dict(), './models/model_with_conv'+str(snr))
+            print(list(model.parameters()))
 
     else:
         test_labels = (torch.rand(1500) * CHANNEL_SIZE).long()
