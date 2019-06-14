@@ -52,7 +52,6 @@ class Net(nn.Module):
         #x = x / CHANNEL_USE
         x = x / x.norm() * 70
 
-
         return x
 
     def forward(self, x):
@@ -74,15 +73,15 @@ class Net(nn.Module):
         return x
 
 def accuracy(preds, labels):
-    return torch.sum(torch.eq(pred, labels)).item()/(list(preds.size())[0])
+    return torch.sum((torch.sum(torch.abs(preds-labels), 1)==0)).item()/(list(preds.size())[0])
 
 
 if __name__ == "__main__":
     train_new_model = True 
     if train_new_model == True:
         # Data generation
-        train_labels = (torch.rand(10000) * (2**BLOCK_SIZE)).long()
-        train_data = torch.eye(2**BLOCK_SIZE).index_select(dim=0, index=train_labels)
+        train_data = torch.randint(2, (10000, BLOCK_SIZE)).float()
+        train_labels = train_data
         test_labels = (torch.rand(1500) * (2**BLOCK_SIZE)).long()
         test_data = torch.eye(2**BLOCK_SIZE).index_select(dim=0, index=test_labels)
 
@@ -92,10 +91,11 @@ if __name__ == "__main__":
                   'num_workers': 6}
         training_set = Dataset(train_data, train_labels)
         training_loader = torch.utils.data.DataLoader(training_set, **params)
-        loss_fn = nn.CrossEntropyLoss()
+        loss_fn = nn.MSELoss()
 
         # Training
         snrs_db = np.linspace(-4, 9, num=14)
+        snrs_db = [7]
         for snr in snrs_db:
             loss_list = []
             acc_list = []
@@ -109,9 +109,9 @@ if __name__ == "__main__":
             # use. This is because we wish the autoencoder to learn an optimal
             # coding scheme, so the middle layer should encode a vector of length
             # n.
-            model = Net(2**BLOCK_SIZE, compressed_dim=CHANNEL_USE, snr=snr)
+            model = Net(BLOCK_SIZE, compressed_dim=CHANNEL_USE, snr=snr)
             if USE_CUDA: model = model.cuda()
-            optimizer = Adam(model.parameters(), lr=0.001)
+            optimizer = Adam(model.parameters(), lr=0.005)
 
             #with imageio.get_writer('results/gifs/normalization.gif', mode='I') as writer:
             for epoch in range(NUM_EPOCHS): 
@@ -126,7 +126,7 @@ if __name__ == "__main__":
                     loss.backward()
                     optimizer.step()
                     if batch_idx % (BATCH_SIZE-1) == 0:
-                        pred = torch.argmax(output, dim=1)
+                        pred = torch.round(output)
                         acc = accuracy(pred, labels)  
                         print('Epoch %2d for SNR %s: loss=%.4f, acc=%.2f' % (epoch, snr, loss.item(), acc))
                         loss_list.append(loss.item())
