@@ -8,12 +8,9 @@ from torch.optim import Adam, RMSprop
 import math
 from torch.autograd import Variable
 
-import scipy.signal as signal
-from commpy.modulation import PSKModem
-from commpy.filters import rrcosfilter
-
 import imageio
 from tqdm import tqdm
+from pulseshape_lowpass import pulseshape_lowpass
 
 # Machine learning parameters
 NUM_EPOCHS = 300
@@ -36,17 +33,19 @@ class Net(nn.Module):
         self.encoder = nn.Sequential(
             nn.Linear(in_channels, in_channels),
             nn.LeakyReLU(inplace=True),
+            #nn.Linear(in_channels, in_channels),
+            #nn.LeakyReLU(inplace=True),
             nn.Linear(in_channels, compressed_dim),
         )
 
         self.decoder = nn.Sequential(
             nn.Linear(compressed_dim, in_channels),
             nn.LeakyReLU(inplace=True),
+            #nn.Linear(in_channels, in_channels),
+            #nn.LeakyReLU(inplace=True),
             nn.Linear(in_channels, in_channels)
         ) 
 
-        self.h_lowpass = np.loadtxt('h_lowpass.txt')
-        self.h_pulseshape = np.loadtxt('h_pulseshape.txt')
 
     def decode(self, x):
         return self.decoder(x)
@@ -66,114 +65,24 @@ class Net(nn.Module):
         batch_size = len(x)
         x = self.encode(x)
 
-        # 7dBW to SNR.
+        x = pulseshape_lowpass(x, 20, batch_size, USE_CUDA)
+
+        # Simulated Gaussian noise.
         training_signal_noise_ratio = 10**(0.1*self.snr) 
 
         # bit / channel_use
         communication_rate = BLOCK_SIZE / CHANNEL_USE   
 
-
-        ###### Start of sketchy stuff #######
-        x = x.cpu().detach().numpy()
-
-        # We would like to learn an optimal coding for this given modulation scheme. 
-        # An optimal coding will be of whatever length x is, because the encoder will add redundancy
-        # to the original signal s. Therefore, the value of M should be the 2 to the power of the length of x, since the 
-        # number of total symbols to modulate is 2**len(x)
-        bits_per_code = x.shape[1]
-
-        # Total number of possible codes (i.e. number of constellation points in a plot)
-        M = 2**bits_per_code
-        samps_per_symb = 20
-
-
-        # Simple PSK modulator
-        hmod = PSKModem(M)
-
-        res = np.zeros((batch_size, x.shape[1]))
-        for b in range(batch_size):
-            x[b] = [int(np.round(x[b, i])) for i in range(len(x[b]))]
-        x = x.astype(int)
-        for b in range(batch_size):
-            sign_mask = [-1 if x[b][i] < 0 else 1 for i in range(len(x[b]))]
-
-            # Convert to bit stream
-            x_bit = self._convert_to_bit_stream(x[b], bits_per_code, batch_size)
-            #print('x_bit', x_bit.shape)
-
-            # Modulate them
-            x_mod = hmod.modulate(x_bit)
-            #print('x_mod', x_mod.shape)
-            x_samples = self._upsample(x_mod, samps_per_symb);
-            #print('x_samples', x_samples.shape)
-
-            # Filter with pulse shape filter first
-            x_pulseshaped = np.convolve(x_samples, self.h_pulseshape, 'same') # Waveform with PSF
-            #print('x_pulseshaped', x_pulseshaped.shape)
-
-            # Then low pass filter
-            x_pulseshaped_lowpassed = np.convolve(x_pulseshaped, self.h_lowpass, 'same')
-            #print('x_pulseshaped_lowpassed', x_pulseshaped_lowpassed.shape)
-
-            # Receive by match filtering first before downsample
-            y = self._downsample(np.convolve(x_pulseshaped_lowpassed, self.h_pulseshape, 'same'), samps_per_symb) * samps_per_symb
-            #print('y', y.shape)
-
-            # Demodulate
-            demod_bits = hmod.demodulate(y, 'hard')
-
-            # Convert back to integers
-            res_b = self._convert_to_int_stream(demod_bits, bits_per_code)
-            res_b = np.multiply(res_b, sign_mask)
-            res[b] = res_b
-
-        res = torch.from_numpy(np.array(res)).float()
-        if USE_CUDA: res = res.cuda()
-        ###### End of sketchy stuff #######
-
-        # Simulated Gaussian noise.
-        noise = Variable(torch.randn(*res.size()) / ((2 * communication_rate * training_signal_noise_ratio) ** 0.5))
+        noise = Variable(torch.randn(*x.size()) / ((2 * communication_rate * training_signal_noise_ratio) ** 0.5))
         if USE_CUDA: noise = noise.cuda()
-        res += noise
+        x += noise
         
-        res = self.decode(res)
+        x = self.decode(x)
 
-        return res 
-
-    def _downsample(self, sig, r):
-        return sig[::r]
-
-    def _upsample(self, sig, r):
-        res = np.zeros(len(sig)*r, dtype=complex)
-        for i in range(len(res)):
-            if i % r == 0:
-                res[i] = sig[int(i / r)]
-        return res
-
-    def _convert_to_bit_stream(self, x, bits_per_code, batch_size):
-        res = [] 
-        for e in x:
-            binary = bin(e)
-            b_ind = binary.index('b')
-            binary = binary[b_ind+1:].zfill(bits_per_code)
-            for mint in binary:
-                res.append(int(mint))
-        return np.array(res)
-
-    def _convert_to_int_stream(self, x, M):
-        res = []
-        for i in range(0, len(x)-M+1, M):
-            binary = x[i:i+M]
-            res.append(int("".join(str(x) for x in binary), 2)) 
-        return np.array(res)
-
-    def _batch_modulate(self, x, modulator, batch_size):
-        for b in range(batch_size):
-            modulator
-
+        return x 
 
 def accuracy(preds, labels):
-    return torch.sum(torch.eq(pred, labels)).item()/(list(preds.size())[0])
+    return torch.sum(torch.eq(preds, labels)).item()/(list(preds.size())[0])
 
 
 if __name__ == "__main__":
@@ -243,8 +152,20 @@ if __name__ == "__main__":
                         #image = imageio.imread('results/images/foo'+str(epoch)+'.png')
                         #writer.append_data(image)
 
+                if USE_CUDA:
+                    test_data = test_data.cuda()
+                    test_labels = test_labels.cuda()
 
-            torch.save(model.state_dict(), './models/model_with_fancy_mod'+str(snr))
+
+                if epoch % 10 == 0:
+                    val_output = model(test_data)
+                    val_loss = loss_fn(val_output, test_labels)
+                    val_pred = torch.argmax(val_output, dim=1)
+                    print(val_pred.size(), test_labels.size())
+                    val_acc = accuracy(val_pred, test_labels)  
+                    print('Validation: Epoch %2d for SNR %s: loss=%.4f, acc=%.2f' % (epoch, snr, val_loss.item(), val_acc))
+
+            torch.save(model.state_dict(), './models/model_with_fancy_mod_and_more_layers'+str(snr))
             print(list(model.parameters()))
 
     else:
