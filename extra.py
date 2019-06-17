@@ -9,13 +9,14 @@ import math
 from torch.autograd import Variable
 
 import imageio
+from pulseshape_lowpass import pulseshape_lowpass
 
 # Machine learning parameters
 NUM_EPOCHS = 300
 BATCH_SIZE = 256
 
 # Comms parameters
-CHANNEL_USE = 7 # The parameter n
+CHANNEL_USE = 4 # The parameter n
 BLOCK_SIZE = 4 # The parameter k
 
 # Torch parameters
@@ -46,7 +47,7 @@ class Net(nn.Module):
 
     def encode(self, x):
         x = self.encoder(x)
-        #x = self.dropout(x)
+        x = self.dropout(x)
 
         # Normalization so that every element of x is normalized. Forces unit amplitude...? question about coding vs modulation
         #x = (x / x.norm(dim=-1)[:, None])
@@ -57,15 +58,17 @@ class Net(nn.Module):
         return x
 
     def forward(self, x):
+        batch_size = len(x)
         x = self.encode(x)
 
-        # 7dBW to SNR.
+        x = pulseshape_lowpass(x, 20, batch_size, USE_CUDA)
+
+        # Simulated Gaussian noise.
         training_signal_noise_ratio = 10**(0.1*self.snr) 
 
         # bit / channel_use
         communication_rate = BLOCK_SIZE / CHANNEL_USE   
 
-        # Simulated Gaussian noise.
         noise = Variable(torch.randn(*x.size()) / ((2 * communication_rate * training_signal_noise_ratio) ** 0.5))
         if USE_CUDA: noise = noise.cuda()
         x += noise
@@ -78,7 +81,9 @@ class Net(nn.Module):
 def accuracy(preds, labels, to_print=False):
     if to_print:
         print(torch.abs(preds-labels))
+    # complete accuracy by sample
     acc1 = torch.sum((torch.sum(torch.abs(preds-labels), 1)==0)).item()/(list(preds.size())[0])
+    # total accuracy over everything
     acc2 = 1 - torch.sum(torch.abs(preds-labels)).item() / (list(preds.size())[0]*list(preds.size())[1])
     return acc2
 
@@ -159,7 +164,7 @@ if __name__ == "__main__":
                     val_acc = accuracy(val_pred, test_labels, True)  
                     print('Validation: Epoch %2d for SNR %s: loss=%.4f, acc=%.2f' % (epoch, snr, val_loss.item(), val_acc))
 
-            torch.save(model.state_dict(), './models/model_state_validation')
+            #torch.save(model.state_dict(), './models/model_state_validation')
     else:
         test_labels = (torch.rand(1500) * CHANNEL_SIZE).long()
         test_data = torch.eye(CHANNEL_SIZE).index_select(dim=0, index=test_labels)
