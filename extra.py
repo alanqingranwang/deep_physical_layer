@@ -16,7 +16,7 @@ import torch.nn.functional as F
 import itertools
 
 # Machine learning parameters
-NUM_EPOCHS = 800
+NUM_EPOCHS = 50 
 BATCH_SIZE = 256
 LEARN_RATE = 0.01
 DROP_RATE = 0
@@ -26,7 +26,6 @@ CHANNEL_USE = 32 # The parameter n
 BLOCK_SIZE = 4 # The parameter k
 
 # Signal processing parameters
-# LPF_CUTOFF = 1/2
 NUM_TAPS = 100
 
 # Torch parameters
@@ -53,9 +52,6 @@ class Net(nn.Module):
             nn.Linear(dec_compressed_dim, in_channels),
             nn.PReLU(),
             nn.BatchNorm1d(in_channels),
-            # nn.Linear(in_channels, in_channels),
-            # nn.LeakyReLU(),
-            # nn.BatchNorm1d(in_channels),
             nn.Dropout(p=DROP_RATE),
             nn.Linear(in_channels, in_channels)
         )
@@ -101,14 +97,46 @@ class Net(nn.Module):
         x = self.sig(x) # Sigmoid for BCELoss
         return x
 
+    @staticmethod
+    def accuracy(preds, labels):
+        # block-wise accuracy
+        acc1 = torch.sum((torch.sum(torch.abs(preds-labels), 1)==0)).item()/(list(preds.size())[0])
+        # bit-wise accuracy
+        acc2 = 1 - torch.sum(torch.abs(preds-labels)).item() / (list(preds.size())[0]*list(preds.size())[1])
+        return acc2
 
-def accuracy(preds, labels):
-    # block-wise accuracy
-    acc1 = torch.sum((torch.sum(torch.abs(preds-labels), 1)==0)).item()/(list(preds.size())[0])
-    # bit-wise accuracy
-    acc2 = 1 - torch.sum(torch.abs(preds-labels)).item() / (list(preds.size())[0]*list(preds.size())[1])
-    return acc2
+def create_fft_plots():
+    # Create gif of fft
+    sample = torch.tensor([1., 0., 1., 0.]).cuda()
+    train_code = model.encode(sample.view(1, -1))
+    fig = plt.figure()
+    L = 100
+    train_code_pad = torch.zeros(L)
+    train_code_pad[:len(train_code[0])] = train_code[0]
+    H = torch.rfft(train_code_pad, 1, normalized=True).cpu().detach().numpy()
+    plt.plot([np.sqrt(H[i, 0]**2 + H[i, 1]**2) for i in range(len(H))])
 
+    lowpass_coeff = model.conv1.weight.data.view(-1)
+    lowpass_pad = torch.zeros(L)
+    lowpass_pad[:len(lowpass_coeff)] = lowpass_coeff
+    lowpass_fft = torch.rfft(lowpass_pad, 1, normalized=False).cpu().detach().numpy()
+    plt.plot([np.sqrt(lowpass_fft[i, 0]**2 + lowpass_fft[i, 1]**2) for i in range(len(lowpass_fft))])
+    plt.title('Epoch ' + str(epoch))
+    plt.savefig('results/images/fft_none/fft_%s.png' % (str(epoch).zfill(4)))
+    fig.clf()
+    plt.close()
+
+def create_constellation_plots():
+    # Create gif of constellations
+    if USE_CUDA: train_data = train_data.cuda()
+    train_codes = model.encode(train_data)
+    train_codes = train_codes.cpu().detach().numpy()
+    fig = plt.figure()
+    plt.scatter(train_codes[:, 0], train_codes[:, 1])
+    plt.title('Epoch ' + str(epoch))
+    plt.savefig('results/images/constellation/const_%3d.png' % (epoch))
+    fig.clf()
+    plt.close()
 
 if __name__ == "__main__":
     # Data generation
@@ -116,6 +144,7 @@ if __name__ == "__main__":
     train_labels = train_data
     test_data = torch.randint(2, (2500, BLOCK_SIZE)).float()
     test_labels = test_data
+    np.savetxt('./test_data.txt', test_data)
 
     # Data loading
     params = {'batch_size': BATCH_SIZE,
@@ -126,19 +155,20 @@ if __name__ == "__main__":
     loss_fn = nn.BCEWithLogitsLoss()
 
     # Data for constellation generation
-    sample_data = torch.tensor(list(map(list, itertools.product([0, 1], repeat=BLOCK_SIZE)))).float().cuda()
-    if USE_CUDA: sample_data = sample_data.cuda()
+    # sample_data = torch.tensor(list(map(list, itertools.product([0, 1], repeat=BLOCK_SIZE)))).float().cuda()
+    # if USE_CUDA: sample_data = sample_data.cuda()
 
     # Data for fft generation
-    sample = torch.randint(2, (1, BLOCK_SIZE)).float().cuda()
-    if USE_CUDA: sample = sample.cuda()
+    # sample = torch.randint(2, (1, BLOCK_SIZE)).float().cuda()
+    # if USE_CUDA: sample = sample.cuda()
 
     # Training
-    snrs_db = np.linspace(-5, 10, num=20)
+    snrs_db = np.linspace(2, 15, num=20)
     # plt.figure()
+    bler_autoenc = []
     for i, snr in enumerate(snrs_db):
-        if snr < 6.1:
-            continue
+        last_val_acc = 0
+        last_model_state = None
 
         val_loss_list_normal = []
         val_acc_list_normal = []
@@ -149,9 +179,6 @@ if __name__ == "__main__":
         # use. This is because we wish the autoencoder to learn an optimal
         # coding scheme, so the middle layer should encode a vector of length
         # n.
-        # h_lowpass_normal = torch.tensor(np.loadtxt('sharp_h_lowpass_0.40.txt')).float().cuda()
-
-        # The lowpass filter layer doesn't get its weights changed
 
         com_dim = NUM_TAPS+CHANNEL_USE-1
         model = Net(in_channels=BLOCK_SIZE, enc_compressed_dim=CHANNEL_USE, dec_compressed_dim=com_dim, lpf_num_taps=NUM_TAPS, snr=snr)
@@ -163,6 +190,8 @@ if __name__ == "__main__":
         for epoch in range(NUM_EPOCHS):
             cutoff = max(0.3, (NUM_EPOCHS-epoch-1)/NUM_EPOCHS)
             h_lowpass = torch.from_numpy(signal.firwin(NUM_TAPS, cutoff)).float().cuda()
+
+            # The lowpass filter layer doesn't get its weights changed
             model.conv1.weight.requires_grad = False
             model.conv1.weight.data = h_lowpass.view(1, 1, -1)
 
@@ -179,43 +208,12 @@ if __name__ == "__main__":
                 optimizer.step()
                 if batch_idx % (BATCH_SIZE-1) == 0:
                     pred = torch.round(output)
-                    acc = accuracy(pred, labels)
+                    acc = model.accuracy(pred, labels)
                     print('Epoch %2d for SNR %s: loss=%.4f, acc=%.2f' % (epoch, snr, loss.item(), acc))
                     # loss_list.append(loss.item())
                     # acc_list.append(acc)
 
                     model.eval()
-
-                    # Create gif of constellations
-                    train_data = train_data.cuda()
-                    train_codes = model.encode(train_data)
-                    train_codes = train_codes.cpu().detach().numpy()
-                    fig = plt.figure()
-                    plt.scatter(train_codes[:, 0], train_codes[:, 1])
-                    plt.title('Epoch ' + str(epoch))
-                    plt.savefig('results/images/constellation/const_%3d.png' % (epoch))
-                    fig.clf()
-                    plt.close()
-
-                    # Create gif of fft
-                    sample = torch.tensor([1., 0., 1., 0.]).cuda()
-                    train_code = model.encode(sample.view(1, -1))
-                    fig = plt.figure()
-                    L = 100
-                    train_code_pad = torch.zeros(L)
-                    train_code_pad[:len(train_code[0])] = train_code[0]
-                    H = torch.rfft(train_code_pad, 1, normalized=True).cpu().detach().numpy()
-                    plt.plot([np.sqrt(H[i, 0]**2 + H[i, 1]**2) for i in range(len(H))])
-
-                    lowpass_coeff = model.conv1.weight.data.view(-1)
-                    lowpass_pad = torch.zeros(L)
-                    lowpass_pad[:len(lowpass_coeff)] = lowpass_coeff
-                    lowpass_fft = torch.rfft(lowpass_pad, 1, normalized=False).cpu().detach().numpy()
-                    plt.plot([np.sqrt(lowpass_fft[i, 0]**2 + lowpass_fft[i, 1]**2) for i in range(len(lowpass_fft))])
-                    plt.title('Epoch ' + str(epoch))
-                    plt.savefig('results/images/fft_none/fft_%s.png' % (str(epoch).zfill(4)))
-                    fig.clf()
-                    plt.close()
 
                     # Validation
                     if USE_CUDA:
@@ -225,18 +223,17 @@ if __name__ == "__main__":
                         val_output = model(test_data)
                         val_loss = loss_fn(val_output, test_labels)
                         val_pred = torch.round(val_output)
-                        val_acc = accuracy(val_pred, test_labels)
-                        val_loss_list_normal.append(val_loss)
-                        val_acc_list_normal.append(val_acc)
+                        val_acc = model.accuracy(val_pred, test_labels)
+                        # val_loss_list_normal.append(val_loss)
+                        # val_acc_list_normal.append(val_acc)
                         print('Validation: Epoch %2d for SNR %s and cutoff %s: loss=%.4f, acc=%.5f' % (epoch, snr, cutoff, val_loss.item(), val_acc))
-                    model.train()
-        torch.save(model.state_dict(), './models/model_lpf_shift_' + str(snr))
-    # plt.figure()
-    # plt.plot(val_loss_list_normal, label='normal')
-    # plt.legend()
-    # plt.savefig('./results/loss_shifting_exper.png')
+                    # Save last validation accuracy and model
+                    if epoch == NUM_EPOCHS-1:
+                        last_val_acc = val_acc
+                        last_model_state = model.state_dict()
+                        print('saving model state with cutoff ' + str(cutoff) + 'and accuracy ' + str(model.accuracy(val_pred, test_labels)))
 
-    # plt.figure()
-    # plt.plot(val_acc_list_normal, label='normal')
-    # plt.legend()
-    # plt.savefig('./results/acc_shifting_exper.png')
+                    model.train()
+        bler_autoenc.append(1-last_val_acc)
+        torch.save(last_model_state, './models/last_model_for_snr_' + str(snr))
+    np.savetxt('./last_val_acc.txt', bler_autoenc)
