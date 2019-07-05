@@ -10,13 +10,14 @@ from torch.autograd import Variable
 import scipy.signal as signal
 
 from model import Net
-
+import pprint
 import imageio
 from pulseshape_lowpass import pulseshape_lowpass
 from tqdm import tqdm
 import torch.nn.functional as F
 import itertools
 import argparse
+import time
 
 parser = argparse.ArgumentParser(description='Channel Model Learning')
 
@@ -24,23 +25,26 @@ parser.add_argument('-j', '--workers', default=8, type=int, metavar='N',
                     help='number of data loading workers (default: 8)')
 parser.add_argument('--epochs', default=500, type=int, metavar='N',
                     help='number of total epochs to run')
-parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
+parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-parser.add_argument('-b', '--batch-size', default=256, type=int,
+parser.add_argument('-b', '--batch_size', default=256, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
-parser.add_argument('--lpf-taps', default=100, type=int,
+parser.add_argument('--use_lpf', dest='use_lpf', action='store_true')
+parser.add_argument('--no_use_lpf', dest='use_lpf', action='store_false')
+parser.set_defaults(use_lpf=True)
+parser.add_argument('--lpf_num_taps', default=100, type=int,
                     metavar='taps', help='number of lpf taps (default: 100)')
-parser.add_argument('--lpf-cutoff', default=0.3, type=int,
+parser.add_argument('--lpf_cutoff', default=0.3, type=int,
                     metavar='cutoff', help='lpf cutoff (default: 0.3)')
 parser.add_argument('--lr', '--learning_rate', default=0.01, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--dropout_rate', default=0., type=float,
-                    metavar='drop_rate', help='dropout rate')
-parser.add_argument('--lpf-shift-type', default='cont', type=str,
+                    metavar='dropout_rate', help='dropout rate')
+parser.add_argument('--lpf_shift_type', default='cont', type=str,
                     metavar='shift_type', help='shift type for lpf training')
-parser.add_argument('--channel-use', default=32, type=int,
+parser.add_argument('--channel_use', default=32, type=int,
                     metavar='channel_use', help='n parameter')
-parser.add_argument('--block-size', default=4, type=int,
+parser.add_argument('--block_size', default=4, type=int,
                     metavar='block_size', help='k parameter')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
@@ -57,9 +61,7 @@ def generate_data(block_size):
     test_labels = test_data
     return train_data, train_labels, test_data, test_labels
 
-def create_fft_plots():
-    # Create gif of fft
-    sample = torch.tensor([1., 0., 1., 0.]).cuda()
+def create_fft_plots(sample, model, epoch):
     train_code = model.encode(sample.view(1, -1))
     fig = plt.figure()
     L = 100
@@ -80,8 +82,9 @@ def create_fft_plots():
 
 def create_constellation_plots():
     # Create gif of constellations
-    if USE_CUDA: train_data = train_data.cuda()
-    train_codes = model.encode(train_data)
+    sample_data = torch.tensor(list(map(list, itertools.product([0, 1], repeat=args.block_size)))).float()
+    if USE_CUDA: sample_data = sample_data.cuda()
+    train_codes = model.encode(sample_data)
     train_codes = train_codes.cpu().detach().numpy()
     fig = plt.figure()
     plt.scatter(train_codes[:, 0], train_codes[:, 1])
@@ -92,9 +95,9 @@ def create_constellation_plots():
 
 def main():
     args = get_args()
-    USE_CUDA = torch.cuda.is_available()
+    pprint.pprint(vars(args))
 
-    print('Training (%d, %d) Autoencoder with %s LPF shifting for %d epochs' % (args.channel_use, args.block_size, args.lpf_shift_type, args.epochs))
+    USE_CUDA = torch.cuda.is_available()
     train_data, train_labels, test_data, test_labels = generate_data(args.block_size)
 
     # Data loading
@@ -105,23 +108,13 @@ def main():
     training_loader = torch.utils.data.DataLoader(training_set, **params)
     loss_fn = nn.BCEWithLogitsLoss()
 
-    # Data for constellation generation
-    sample_data = torch.tensor(list(map(list, itertools.product([0, 1], repeat=args.block_size)))).float()
-    if USE_CUDA: sample_data = sample_data.cuda()
-
-    # Data for fft generation
-    sample = torch.randint(2, (1, args.block_size)).float()
-    if USE_CUDA: sample = sample.cuda()
-
     # Training
     snrs_db = np.linspace(-5, 10, num=10)
     for i, snr in enumerate(snrs_db):
         val_loss_list_normal = []
         val_acc_list_normal = []
 
-
-        com_dim = args.channel_use + args.lpf_taps - 1 
-        model = Net(channel_use=args.channel_use, block_size=args.block_size, snr=snr, use_cuda=USE_CUDA)
+        model = Net(channel_use=args.channel_use, block_size=args.block_size, snr=snr, use_cuda=USE_CUDA, use_lpf=args.use_lpf, dropout_rate=args.dropout_rate)
 
         if USE_CUDA: model = model.cuda()
 
@@ -134,7 +127,7 @@ def main():
                 if epoch % (args.epochs / 10) == 0:
                     cutoff = max(args.lpf_cutoff, (args.epochs-epoch-1)/args.epochs)
 
-            h_lowpass = torch.from_numpy(signal.firwin(args.lpf_taps, cutoff)).float()
+            h_lowpass = torch.from_numpy(signal.firwin(args.lpf_num_taps, cutoff)).float()
             if USE_CUDA: h_lowpass = h_lowpass.cuda()
             model.conv1.weight.data = h_lowpass.view(1, 1, -1)
             model.conv1.weight.requires_grad = False # The lowpass filter layer doesn't get its weights changed
@@ -159,6 +152,11 @@ def main():
 
                     model.eval()
 
+                    # Create gif of fft
+                    sample = torch.randint(2, (1, args.block_size)).float()
+                    if USE_CUDA: sample = sample.cuda()
+                    create_fft_plots(sample, model, epoch)
+
                     # Validation
                     if USE_CUDA:
                         test_data = test_data.cuda()
@@ -172,10 +170,7 @@ def main():
                         # val_acc_list_normal.append(val_acc)
                         print('Validation: Epoch %2d for SNR %s and cutoff %s: loss=%.4f, acc=%.5f' % (epoch, snr, cutoff, val_loss.item(), val_acc))
                     model.train()
-        if args.lpf_shift_type == 'cont':
-            torch.save(model.state_dict(), './models/cont_big_model_' + str(snr))
-        else:
-            torch.save(model.state_dict(), './models/disc_big_model_' + str(snr))
+            torch.save(model.state_dict(), './models/test_%s' % str(snr))
 
 if __name__ == "__main__":
     main()
