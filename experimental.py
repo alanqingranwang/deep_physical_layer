@@ -30,8 +30,11 @@ parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
 parser.add_argument('-b', '--batch_size', default=256, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
 parser.add_argument('--use_lpf', dest='use_lpf', action='store_true')
-parser.add_argument('--no_use_lpf', dest='use_lpf', action='store_false')
+parser.add_argument('--no_lpf', dest='use_lpf', action='store_false')
 parser.set_defaults(use_lpf=True)
+parser.add_argument('--use_complex', dest='use_complex', action='store_true')
+parser.add_argument('--use_real', dest='use_complex', action='store_false')
+parser.set_defaults(use_complex=False)
 parser.add_argument('--lpf_num_taps', default=100, type=int,
                     metavar='taps', help='number of lpf taps (default: 100)')
 parser.add_argument('--lpf_cutoff', default=0.3, type=int,
@@ -54,10 +57,15 @@ parser.add_argument('-e', '--evaluate', type=str, metavar='FILE',
 def get_args():
     return parser.parse_args()
 
-def generate_data(block_size):
-    train_data = torch.randint(2, (10000, block_size)).float()
+def generate_data(block_size, use_complex):
+    if use_complex:
+        train_data = torch.randint(2, (10000, block_size*2)).float()
+        test_data = torch.randint(2, (2500, block_size*2)).float()
+    else:
+        train_data = torch.randint(2, (10000, block_size)).float()
+        test_data = torch.randint(2, (2500, block_size)).float()
+
     train_labels = train_data
-    test_data = torch.randint(2, (2500, block_size)).float()
     test_labels = test_data
     return train_data, train_labels, test_data, test_labels
 
@@ -80,16 +88,17 @@ def create_fft_plots(sample, model, epoch):
     fig.clf()
     plt.close()
 
-def create_constellation_plots():
+def create_constellation_plots(sample_data, model, snr, epoch):
     # Create gif of constellations
-    sample_data = torch.tensor(list(map(list, itertools.product([0, 1], repeat=args.block_size)))).float()
-    if USE_CUDA: sample_data = sample_data.cuda()
+    sample_data = torch.unsqueeze(torch.tensor([1.,0.,0.,0.,0.,0.,0.,0.]), 0).cuda()
     train_codes = model.encode(sample_data)
     train_codes = train_codes.cpu().detach().numpy()
     fig = plt.figure()
-    plt.scatter(train_codes[:, 0], train_codes[:, 1])
-    plt.title('Epoch ' + str(epoch))
-    plt.savefig('results/images/constellation/const_%3d.png' % (epoch))
+    plt.scatter(train_codes[:,:32], train_codes[:,32:])
+    plt.xlim([-5, 5])
+    plt.ylim([-5, 5])
+    plt.title('SNR %s, Epoch %s' % (str(snr), str(epoch)))
+    plt.savefig('results/images/constellation/const_%s_%s.png' % (str(snr).zfill(2), str(epoch).zfill(4)))
     fig.clf()
     plt.close()
 
@@ -98,12 +107,12 @@ def main():
     pprint.pprint(vars(args))
 
     USE_CUDA = torch.cuda.is_available()
-    train_data, train_labels, test_data, test_labels = generate_data(args.block_size)
+    train_data, train_labels, test_data, test_labels = generate_data(args.block_size, args.use_complex)
 
     # Data loading
     params = {'batch_size': args.batch_size,
               'shuffle': True,
-              'num_workers': 6}
+              'num_workers': args.workers}
     training_set = Dataset(train_data, train_labels)
     training_loader = torch.utils.data.DataLoader(training_set, **params)
     loss_fn = nn.BCEWithLogitsLoss()
@@ -114,7 +123,7 @@ def main():
         val_loss_list_normal = []
         val_acc_list_normal = []
 
-        model = Net(channel_use=args.channel_use, block_size=args.block_size, snr=snr, use_cuda=USE_CUDA, use_lpf=args.use_lpf, dropout_rate=args.dropout_rate)
+        model = Net(channel_use=args.channel_use, block_size=args.block_size, snr=snr, use_cuda=USE_CUDA, use_lpf=args.use_lpf, use_complex = args.use_complex, dropout_rate=args.dropout_rate)
 
         if USE_CUDA: model = model.cuda()
 
@@ -157,6 +166,11 @@ def main():
                     # if USE_CUDA: sample = sample.cuda()
                     # create_fft_plots(sample, model, epoch)
 
+                    # Create gif of constellations
+                    # sample_data = torch.tensor(list(map(list, itertools.product([0, 1], repeat=args.block_size)))).float()
+                    # if USE_CUDA: sample_data = sample_data.cuda()
+                    # create_constellation_plots(sample_data, model, snr, epoch)
+
                     # Validation
                     if USE_CUDA:
                         test_data = test_data.cuda()
@@ -170,7 +184,7 @@ def main():
                         # val_acc_list_normal.append(val_acc)
                         print('Validation: Epoch %2d for SNR %s and cutoff %s: loss=%.4f, acc=%.5f' % (epoch, snr, cutoff, val_loss.item(), val_acc))
                     model.train()
-            torch.save(model.state_dict(), './models/test_%s' % str(snr))
+            torch.save(model.state_dict(), './models/with_batch_norm_%s' % str(snr))
 
 if __name__ == "__main__":
     main()
