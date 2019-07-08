@@ -153,9 +153,9 @@ def main():
                     model.eval()
 
                     # Create gif of fft
-                    sample = torch.randint(2, (1, args.block_size)).float()
-                    if USE_CUDA: sample = sample.cuda()
-                    create_fft_plots(sample, model, epoch)
+                    # sample = torch.randint(2, (1, args.block_size)).float()
+                    # if USE_CUDA: sample = sample.cuda()
+                    # create_fft_plots(sample, model, epoch)
 
                     # Validation
                     if USE_CUDA:

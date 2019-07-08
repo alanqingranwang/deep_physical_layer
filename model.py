@@ -40,7 +40,7 @@ class Net(nn.Module):
     def encode(self, x):
         x = self.encoder(x)
         # Normalization so that every example x is normalized. Since sample energy should be 1, we multiply by length of x.
-        x = self.block_size * (x / x.norm(dim=-1)[:, None])
+        x = self.channel_use**0.5 * (x / x.norm(dim=1)[:, None])
         return x
 
     def lpf(self, x):
@@ -54,7 +54,7 @@ class Net(nn.Module):
         # bit / channel_use
         rate = self.block_size / self.channel_use
 
-        noise = torch.randn(*x.size()) / ((2 * rate * snr_lin) ** 0.5)
+        noise = torch.randn(*x.size()) * np.sqrt(1/(2 * rate * snr_lin))
         if self.use_cuda: noise = noise.cuda()
         x += noise
         return x
