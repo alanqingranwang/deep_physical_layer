@@ -14,46 +14,44 @@ class Net(nn.Module):
         self.use_lpf = use_lpf
         self.use_complex = use_complex
 
-        self.enc_linear1 = nn.Linear(block_size, block_size)
-        self.enc_linear2 = nn.Linear(block_size, channel_use)
-        self.enc_clinear1 = ComplexLinear(block_size, block_size)
-        self.enc_clinear2 = ComplexLinear(block_size, channel_use)
-
         if use_lpf:
             dec_hidden_dim = lpf_num_taps + channel_use - 1
         else:
             dec_hidden_dim = channel_use
 
-        self.dec_linear1 = nn.Linear(dec_hidden_dim, block_size)
-        self.dec_linear2 = nn.Linear(block_size, block_size)
-        self.dec_clinear1 = ComplexLinear(dec_hidden_dim, block_size)
-        self.dec_clinear2 = ComplexLinear(block_size, block_size)
-
-        self.batchnorm = nn.BatchNorm1d(block_size)
-        self.cbatchnorm = nn.BatchNorm1d(block_size*2)
-        self.dropout = nn.Dropout(p=dropout_rate)
-
         self.conv1 = nn.Conv1d(1, 1, lpf_num_taps, padding=lpf_num_taps-1, bias=False)
-        self.prelu = nn.PReLU()
         self.sig = nn.Sigmoid()
+
+        self.encoder = nn.Sequential(
+                nn.Linear(block_size, block_size),
+                nn.PReLU(),
+                nn.BatchNorm1d(block_size),
+                nn.Linear(block_size, channel_use)
+                )
+        self.decoder = nn.Sequential(
+                nn.Linear(dec_hidden_dim, block_size),
+                nn.PReLU(),
+                nn.BatchNorm1d(block_size),
+                nn.Linear(block_size, block_size)
+                )
+
+        self.complex_encoder = nn.Sequential(
+                ComplexLinear(block_size, block_size),
+                nn.PReLU(),
+                ComplexLinear(block_size, channel_use)
+                )
+        self.complex_decoder = nn.Sequential(
+                ComplexLinear(dec_hidden_dim, block_size),
+                nn.PReLU(),
+                ComplexLinear(block_size, block_size)
+                )
 
     def encode(self, x):
         if self.use_complex:
-            x = self.enc_clinear1(x)
-            x = self.prelu(x)
-            #x = self.cbatchnorm(x)
-            x = self.dropout(x)
-            x = self.enc_clinear2(x)
+            x = self.complex_encoder(x)
         else:
-            x = self.enc_linear1(x)
-            x = self.prelu(x)
-            x = self.batchnorm(x)
-            x = self.dropout(x)
-            x = self.enc_linear2(x)
+            x = self.encoder(x)
 
-        return x
-
-    def normalization(self, x):
         # Normalization so that every example x is normalized.
         # Since sample energy should be 1, we multiply by sqrt
         # of channel_use, since signal energy and vector norm are off by sqrt.
@@ -62,18 +60,9 @@ class Net(nn.Module):
 
     def decode(self, x):
         if self.use_complex:
-            x = self.dec_clinear1(x)
-            x = self.prelu(x)
-            #x = self.cbatchnorm(x)
-            x = self.dropout(x)
-            x = self.dec_clinear2(x)
+            x = self.complex_decoder(x)
         else:
-            x = self.dec_linear1(x)
-            x = self.prelu(x)
-            x = self.batchnorm(x)
-            x = self.dropout(x)
-            x = self.dec_linear2(x)
-
+            x = self.decoder(x)
         return x
 
     def lpf(self, x):
@@ -91,14 +80,22 @@ class Net(nn.Module):
         x += noise
         return x
 
+    def calc_energy(self, x):
+        x_comp = x.view(-1, 2, x.shape[1] // 2)
+        x_abs = torch.norm(x_comp, dim=1)
+        x_sq = torch.mul(x_abs, x_abs)
+        e = torch.sum(x_sq, dim=1)
+        print(e)
+
     def forward(self, x):
         x = self.encode(x)
-        x = self.normalization(x)
+        # self.calc_energy(x)
         if self.use_lpf:
             x = self.lpf(x)
         x = self.awgn(x)
+        # self.calc_energy(x)
         x = self.decode(x)
-        x = self.sig(x) # Sigmoid for BCELoss
+        # x = self.sig(x) # Sigmoid for BCELoss
         return x
 
     @staticmethod

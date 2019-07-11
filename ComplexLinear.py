@@ -2,6 +2,10 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+"""
+Represent complex numbers as [1, 2*N] vector, where
+real part is in [:N] and imag part is in [N:]
+"""
 class ComplexLinear(nn.Module):
     def __init__(self, in_dim, out_dim):
         super(ComplexLinear, self).__init__()

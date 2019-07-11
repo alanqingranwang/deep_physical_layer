@@ -1,4 +1,0 @@
-#!/bin/bash
-
-python extra.py
-python bler_plotter.py

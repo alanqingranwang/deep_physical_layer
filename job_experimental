@@ -1,4 +1,0 @@
-#!/bin/bash
-
-python experimental.py --epochs 1000 --lpf-shift-type 'cont'
-python bler_plotter.py
