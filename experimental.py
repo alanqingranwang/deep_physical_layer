@@ -8,6 +8,7 @@ from torch.optim import Adam, SGD
 import math
 from torch.autograd import Variable
 import scipy.signal as signal
+from sklearn.manifold import TSNE
 
 from model import Net
 import pprint
@@ -77,17 +78,21 @@ def generate_data(block_size, use_complex):
 
 def create_fft_plots(sample, model, epoch):
     train_code = model.encode(sample.view(1, -1))
+    train_code = train_code[0]
     fig = plt.figure()
-    L = 100
-    train_code_pad = torch.zeros(L)
-    train_code_pad[:len(train_code[0])] = train_code[0]
-    H = torch.rfft(train_code_pad, 1, normalized=True).cpu().detach().numpy()
+    train_code_pad = torch.zeros(100).cuda()
+    train_code_pad[:len(train_code)] = train_code
+    train_code_complex = torch.stack((train_code_pad, torch.zeros(*train_code_pad.size()).cuda()), dim=1).cuda()
+    H = torch.fft(train_code_complex, 1, normalized=True).cpu().detach().numpy()
     plt.plot([np.sqrt(H[i, 0]**2 + H[i, 1]**2) for i in range(len(H))])
 
-    lowpass_coeff = model.conv1.weight.data.view(-1)
-    lowpass_pad = torch.zeros(L)
-    lowpass_pad[:len(lowpass_coeff)] = lowpass_coeff
-    lowpass_fft = torch.rfft(lowpass_pad, 1, normalized=False).cpu().detach().numpy()
+    filter_real = model.conv1.conv_real.weight.data.view(-1)
+    filter_imag = model.conv1.conv_imag.weight.data.view(-1)
+    # lowpass_pad = torch.zeros(L)
+    # lowpass_pad[:len(lowpass_coeff)] = lowpass_coeff
+    filter_complex = torch.stack((filter_real, filter_imag), dim=1)
+    print(filter_complex.shape)
+    lowpass_fft = torch.fft(filter_complex, 1, normalized=False).cpu().detach().numpy()
     plt.plot([np.sqrt(lowpass_fft[i, 0]**2 + lowpass_fft[i, 1]**2) for i in range(len(lowpass_fft))])
     plt.title('Epoch ' + str(epoch))
     plt.savefig('results/images/fft_none/fft_%s.png' % (str(epoch).zfill(4)))
@@ -98,8 +103,11 @@ def create_constellation_plots(sample_data, block_size, channel_use, model, snr,
     # Create gif of constellations
     train_codes = model.encode(sample_data)
     train_codes_cpu = train_codes.cpu().detach().numpy()
-    print(train_codes_cpu.shape)
+    embed = TSNE().fit_transform(train_codes_cpu)
+
     fig = plt.figure()
+    plt.scatter(embed[:,0], embed[:,1])
+    plt.title('t-SNE Embedding of (%s, %s) Encoding, Epoch %s' % (channel_use, block_size, str(epoch)))
 
     # # Add noise on top
     # snr_lin = 10**(0.1*snr)
@@ -123,14 +131,14 @@ def create_constellation_plots(sample_data, block_size, channel_use, model, snr,
     #     else:
     #         plt.scatter(noisiness[:,i].real, noisiness[:,i].imag, s=10, color=next(colors))
 
-    if use_complex:
-        for i in range(train_codes_cpu.shape[1] // 2):
-            plt.scatter(train_codes_cpu[:,i], train_codes_cpu[:,i + channel_use])
-    else:
-        plt.scatter(train_codes_cpu.real, train_codes_cpu.imag, c='r')
-    plt.xlim([-2, 2])
-    plt.ylim([-2, 2])
-    plt.title('SNR %s, Epoch %s' % (str(snr), str(epoch)))
+    # if use_complex:
+    #     plt.scatter(train_codes_cpu[:,0], train_codes_cpu[:,0 + channel_use])
+    #     # for i in range(train_codes_cpu.shape[1] // 2):
+    #     #     plt.scatter(train_codes_cpu[:,i], train_codes_cpu[:,i + channel_use])
+    # else:
+    #     plt.scatter(train_codes_cpu.real, train_codes_cpu.imag, c='r')
+    plt.xlim([-500, 500])
+    plt.ylim([-500, 500])
     plt.savefig('results/images/constellation/const_%s_%s.png' % (str(snr).zfill(2), str(epoch).zfill(4)))
     fig.clf()
     plt.close()
@@ -162,16 +170,39 @@ def main():
     optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
 
     for epoch in range(args.epochs):
-        if args.lpf_shift_type == 'cont':
-            cutoff = max(args.lpf_cutoff, (args.epochs-epoch-1)/args.epochs)
-        else:
-            if epoch % (args.epochs / 10) == 0:
-                cutoff = max(args.lpf_cutoff, (args.epochs-epoch-1)/args.epochs)
+        # if args.lpf_shift_type == 'cont':
+        #     cutoff = max(args.lpf_cutoff, (args.epochs-epoch-1)/args.epochs)
+        # else:
+        #     if epoch % (args.epochs / 10) == 0:
+        #         cutoff = max(args.lpf_cutoff, (args.epochs-epoch-1)/args.epochs)
 
-        h_lowpass = torch.from_numpy(signal.firwin(args.lpf_num_taps, cutoff)).float()
-        if USE_CUDA: h_lowpass = h_lowpass.cuda()
-        model.conv1.weight.data = h_lowpass.view(1, 1, -1)
-        model.conv1.weight.requires_grad = False # The lowpass filter layer doesn't get its weights changed
+
+        for name, param in model.named_parameters():
+            if 'conv' in name:
+                param.requires_grad = False
+
+        f1, f2 = 0.1, 0.4
+        f3, f4 = 0.5, 0.8
+        taps1 = signal.firwin(args.lpf_num_taps, [f1, f2], pass_zero=False)
+        taps2 = signal.firwin(args.lpf_num_taps, [f3, f4], pass_zero=False)
+        taps = taps1 + taps2
+        filter_real = torch.tensor(taps).float().cuda()
+        filter_imag = torch.zeros(args.lpf_num_taps).view(1, 1, -1).cuda()
+
+        model.conv1.conv_real.weight.data = filter_real.view(1, 1, -1)
+        model.conv1.conv_imag.weight.data = filter_imag.view(1, 1, -1)
+        cutoff = 0
+        # filter_real = torch.randint(20, (args.lpf_num_taps,)).float()
+        # filter_imag = torch.randint(20, (args.lpf_num_taps,)).float()
+        # if USE_CUDA:
+        #     filter_real = filter_real.cuda()
+        #     filter_imag = filter_imag.cuda()
+        # filter_comp = torch.stack((filter_real, filter_imag), dim=1)
+        # fft = torch.ifft(filter_comp, 1)
+        # # model.conv1.conv_real.weight.data = filter_real.view(1, 1, -1)
+        # # model.conv1.conv_imag.weight.data = filter_imag.view(1, 1, -1)
+        # model.conv1.conv_real.weight.data = fft[:, 0].view(1, 1, -1)
+        # model.conv1.conv_imag.weight.data = fft[:, 1].view(1, 1, -1)
 
         model.train()
         for batch_idx, (batch, labels) in tqdm(enumerate(training_loader), total=int(training_set.__len__()/args.batch_size)):
@@ -179,14 +210,6 @@ def main():
                 batch = batch.cuda()
                 labels = labels.cuda()
             output = model(batch)
-            # test_input = batch[0]
-            # print('input', test_input)
-            # test_code = model.encode(batch[0].view(1, -1))
-            # print('code', test_code)
-            # test_noise = model.awgn(test_code)
-            # print('with noise', test_noise)
-            # test_decode = model.decode(test_noise)
-            # print('output', test_decode)
             loss = loss_fn(output, labels)
 
             optimizer.zero_grad()
@@ -202,19 +225,22 @@ def main():
                 model.eval()
 
                 # Create gif of fft
-                # sample = torch.randint(2, (1, args.block_size)).float()
-                # if USE_CUDA: sample = sample.cuda()
-                # create_fft_plots(sample, model, epoch)
+                if args.use_complex:
+                    sample = torch.zeros(args.block_size*2).float()
+                else:
+                    sample = torch.zeros(args.block_size).float()
+                if USE_CUDA: sample = sample.cuda()
+                create_fft_plots(sample, model, epoch)
 
                 # Save images of constellations
-                lst = torch.tensor(list(map(list, itertools.product([-1, 1], repeat=args.block_size))))
-                if args.use_complex == True:
-                    sample_data = torch.zeros((len(lst), args.block_size*2))
-                    sample_data[:, :args.block_size] = lst
-                else:
-                    sample_data = lst
-                if USE_CUDA: sample_data = sample_data.cuda()
-                create_constellation_plots(sample_data, args.block_size, args.channel_use, model, args.snr, epoch, USE_CUDA, args.use_complex)
+                # lst = torch.tensor(list(map(list, itertools.product([0, 1], repeat=args.block_size))))
+                # if args.use_complex == True:
+                #     sample_data = torch.zeros((len(lst), args.block_size*2))
+                #     sample_data[:, :args.block_size] = lst
+                # else:
+                #     sample_data = lst
+                # if USE_CUDA: sample_data = sample_data.cuda()
+                # create_constellation_plots(sample_data, args.block_size, args.channel_use, model, args.snr, epoch, USE_CUDA, args.use_complex)
 
                 # Validation
                 if USE_CUDA:
@@ -229,7 +255,10 @@ def main():
                     # val_acc_list_normal.append(val_acc)
                     print('Validation: Epoch %2d for SNR %s and cutoff %s: loss=%.4f, acc=%.5f' % (epoch, args.snr, cutoff, val_loss.item(), val_acc))
                 model.train()
-        torch.save(model.state_dict(), './models/with_batch_norm_%s' % str(args.snr))
+        if args.use_complex:
+            torch.save(model.state_dict(), './models/complex_(%s,%s)_%s' % (str(args.channel_use), str(args.block_size), str(args.snr)))
+        else:
+            torch.save(model.state_dict(), './models/real_(%s,%s)_%s' % (str(args.channel_use), str(args.block_size), str(args.snr)))
 
 if __name__ == "__main__":
     main()

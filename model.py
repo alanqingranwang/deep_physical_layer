@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from torch.autograd import Variable
 import numpy as np
-from ComplexLinear import ComplexLinear
+from ComplexLinear import ComplexLinear, ComplexConv
 
 class Net(nn.Module):
     def __init__(self, channel_use, block_size, snr, use_cuda=True, use_lpf=True, use_complex=False, lpf_num_taps=100, dropout_rate=0):
@@ -19,7 +19,7 @@ class Net(nn.Module):
         else:
             dec_hidden_dim = channel_use
 
-        self.conv1 = nn.Conv1d(1, 1, lpf_num_taps, padding=lpf_num_taps-1, bias=False)
+        self.conv1 = ComplexConv(lpf_num_taps, padding=lpf_num_taps-1)
         self.sig = nn.Sigmoid()
 
         self.encoder = nn.Sequential(
