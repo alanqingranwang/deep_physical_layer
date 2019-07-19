@@ -3,6 +3,7 @@ from torch import nn
 from torch.autograd import Variable
 import numpy as np
 from ComplexLinear import ComplexLinear, ComplexConv
+from scipy.signal import firwin
 
 class Net(nn.Module):
     def __init__(self, channel_use, block_size, snr, use_cuda=True, use_lpf=True, use_complex=False, lpf_num_taps=100, dropout_rate=0):
@@ -13,6 +14,7 @@ class Net(nn.Module):
         self.use_cuda = use_cuda
         self.use_lpf = use_lpf
         self.use_complex = use_complex
+        self.lpf_num_taps = lpf_num_taps
 
         if use_lpf:
             dec_hidden_dim = lpf_num_taps + channel_use - 1
@@ -72,13 +74,18 @@ class Net(nn.Module):
         return x
 
     def awgn(self, x):
+        f1, f2 = 0.5, 0.9
+        awgn_filter = firwin(self.lpf_num_taps, f2)
+
         snr_lin = 10**(0.1*self.snr)
         rate = self.block_size / self.channel_use
-
         noise = torch.randn(*x.size()) * np.sqrt(1/(2 * rate * snr_lin))
-        if self.use_cuda: noise = noise.cuda()
-        x += noise
-        return x
+
+        noise_cpu = noise.detach().numpy()
+        noise_clipped = np.convolve(awgn_filter, noise_cpu[0], 'same')
+        noise_clipped = torch.tensor(noise_clipped).float().cuda()
+        x += noise_clipped
+        return x, noise_clipped
 
     def calc_energy(self, x):
         x_comp = x.view(-1, 2, x.shape[1] // 2)
@@ -92,11 +99,10 @@ class Net(nn.Module):
         # self.calc_energy(x)
         if self.use_lpf:
             x = self.lpf(x)
-        x = self.awgn(x)
+        x, noise = self.awgn(x)
         # self.calc_energy(x)
         x = self.decode(x)
-        # x = self.sig(x) # Sigmoid for BCELoss
-        return x
+        return x, noise
 
     @staticmethod
     def accuracy(preds, labels):

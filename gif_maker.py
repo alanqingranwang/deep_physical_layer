@@ -9,7 +9,7 @@ from experimental import Net
 FFT_PATH = './results/images/fft_none/'
 FFTshift_PATH = './results/images/fft_shift/'
 CONSTELLATION_PATH = './results/images/constellation/'
-AWGN_PATH = '../awgn_pics/'
+AWGN_PATH = './results/images/awgn_pics/'
 fft_images = []
 fft_shift_images = []
 const_images = []
