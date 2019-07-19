@@ -70,16 +70,16 @@ for snr in snrs:
 
 # plt.semilogy(snrs, mean_bers_skip, ls = '-', color = 'b')
 
-# plt.semilogy(np.linspace(-5, 10, num=20), berawgn_bers, ls = '-', color = 'g')
+plt.semilogy(np.linspace(-5, 10, num=20), berawgn_bers, ls = '-', color = 'g')
 plt.semilogy(snrs, bch_bers, ls = '--', color = 'r')
 plt.semilogy(snrs, bigmodel, ls = '--', color = 'b')
 
 legend_strings = []
-# legend_strings.append('Experimental QPSK with Pulseshaping')
+legend_strings.append('Theoretical QPSK')
 legend_strings.append('(128, 64) BCH and QPSK')
 # legend_strings.append('(4,4) Autoencoder, small')
 legend_strings.append('(64,64) Autoencoder')
-plt.xlabel('SNR [dB]')
+plt.xlabel('Eb/No')
 plt.ylabel('Bit Error Rate')
 plt.legend(legend_strings, loc = 'lower left')
 plt.title('BCH/QPSK and (%s, %s) Autoencoder' % (str(channel_use), str(block_size)))

@@ -9,16 +9,17 @@ from experimental import Net
 FFT_PATH = './results/images/fft_none/'
 FFTshift_PATH = './results/images/fft_shift/'
 CONSTELLATION_PATH = './results/images/constellation/'
+AWGN_PATH = '../awgn_pics/'
 fft_images = []
 fft_shift_images = []
 const_images = []
-
-files = glob.glob(FFT_PATH + '*.png')
-files = sorted(files)
-print(files)
-for filename in files:
-    fft_images.append(imageio.imread(filename))
-imageio.mimsave('./results/gifs/fft_none.gif', fft_images)
+awgn_images = []
+# files = glob.glob(FFT_PATH + '*.png')
+# files = sorted(files)
+# print(files)
+# for filename in files:
+#     fft_images.append(imageio.imread(filename))
+# imageio.mimsave('./results/gifs/fft_none.gif', fft_images)
 
 # files = glob.glob(FFTshift_PATH + '*.png')
 # files = sorted(files)
@@ -33,6 +34,12 @@ imageio.mimsave('./results/gifs/fft_none.gif', fft_images)
 #     const_images.append(imageio.imread(filename))
 # imageio.mimsave('./results/gifs/const.gif', const_images)
 
+files = glob.glob(AWGN_PATH + '*.png')
+files = sorted(files)
+print(files)
+for filename in files:
+    awgn_images.append(imageio.imread(filename))
+imageio.mimsave('./results/gifs/awgn.gif', awgn_images)
 # block_size = 4
 # channel_use = 2
 # USE_CUDA = True
