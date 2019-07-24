@@ -60,7 +60,7 @@ bigmodel = []
 for snr in snrs:
     print(snr)
     model = Net(channel_use=channel_use, block_size=block_size, snr=snr, use_cuda=USE_CUDA, use_lpf=False, use_complex=True, dropout_rate=0)
-    model.load_state_dict(torch.load('./models/complex_(64,64)_' + str(8) + '.0'))
+    model.load_state_dict(torch.load('./models/64_64_' + str(snr) + '.0'))
     model.eval()
     if USE_CUDA: model = model.cuda()
     test_out = model(test_complex_data)

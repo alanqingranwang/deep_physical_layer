@@ -225,12 +225,12 @@ def main():
                 model.eval()
 
                 # Create gif of fft
-                if args.use_complex:
-                    sample = torch.zeros(args.block_size*2).float()
-                else:
-                    sample = torch.zeros(args.block_size).float()
-                if USE_CUDA: sample = sample.cuda()
-                create_fft_plots(sample, model, epoch)
+                # if args.use_complex:
+                #     sample = torch.zeros(args.block_size*2).float()
+                # else:
+                #     sample = torch.zeros(args.block_size).float()
+                # if USE_CUDA: sample = sample.cuda()
+                # create_fft_plots(sample, model, epoch)
 
                 # Save images of constellations
                 # lst = torch.tensor(list(map(list, itertools.product([0, 1], repeat=args.block_size))))
