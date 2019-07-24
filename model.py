@@ -73,9 +73,16 @@ class Net(nn.Module):
         x = x.view(x.shape[0], -1)
         return x
 
-    def awgn(self, x):
-        f1, f2 = 0.5, 0.9
-        awgn_filter = firwin(self.lpf_num_taps, f2)
+    def awgn(self, x, epoch):
+        if epoch >= 0 and epoch < 75:
+            f1, f2 = 0.4, 0.6
+        elif epoch >= 75 and epoch < 150:
+            f1, f2 = 0.1, 0.4
+        else:
+            f1, f2 = 0.5, 0.9
+
+        print(f1, f2)
+        awgn_filter = firwin(32, [f1, f2], pass_zero=False)
 
         snr_lin = 10**(0.1*self.snr)
         rate = self.block_size / self.channel_use
@@ -94,13 +101,11 @@ class Net(nn.Module):
         e = torch.sum(x_sq, dim=1)
         print(e)
 
-    def forward(self, x):
+    def forward(self, x, epoch):
         x = self.encode(x)
-        # self.calc_energy(x)
         if self.use_lpf:
             x = self.lpf(x)
-        x, noise = self.awgn(x)
-        # self.calc_energy(x)
+        x, noise = self.awgn(x, epoch)
         x = self.decode(x)
         return x, noise
 

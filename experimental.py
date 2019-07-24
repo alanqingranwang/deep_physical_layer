@@ -190,7 +190,7 @@ def main():
             if USE_CUDA:
                 batch = batch.cuda()
                 labels = labels.cuda()
-            output, noise = model(batch)
+            output, noise = model(batch, epoch)
             loss = loss_fn(output, labels)
 
             optimizer.zero_grad()
@@ -228,7 +228,7 @@ def main():
                     test_data = test_data.cuda()
                     test_labels = test_labels.cuda()
                 if epoch % 10 == 0:
-                    val_output, _ = model(test_data)
+                    val_output, _ = model(test_data, epoch)
                     val_loss = loss_fn(val_output, test_labels)
                     val_pred = torch.round(torch.sigmoid(val_output))
                     val_acc = model.accuracy(val_pred, test_labels)
