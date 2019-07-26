@@ -59,26 +59,39 @@ if USE_CUDA:
 bigmodel = []
 for snr in snrs:
     print(snr)
-    model = Net(channel_use=channel_use, block_size=block_size, snr=snr, use_cuda=USE_CUDA, use_lpf=False, use_complex=True, dropout_rate=0)
-    model.load_state_dict(torch.load('./models/64_64_' + str(snr) + '.0'))
+    model = Net(channel_use=8, block_size=4, snr=snr, use_cuda=USE_CUDA, use_lpf=False, use_complex=True, dropout_rate=0)
+    model.load_state_dict(torch.load('./models/complex_(8,4)_' + str(-5) + '.0'))
     model.eval()
     if USE_CUDA: model = model.cuda()
-    test_out = model(test_complex_data)
+    test_out = model(test_complex_data, snr)
     pred = torch.round(torch.sigmoid(test_out))
     # print(model.accuracy(pred, test_labels))
     bigmodel.append(1-model.accuracy(pred, test_complex_labels))
 
+smallmodel = []
+for snr in snrs:
+    print(snr)
+    model = Net(channel_use=4, block_size=4, snr=snr, use_cuda=USE_CUDA, use_lpf=False, use_complex=True, dropout_rate=0)
+    model.load_state_dict(torch.load('./models/complex_(4,4)_' + str(-5) + '.0'))
+    model.eval()
+    if USE_CUDA: model = model.cuda()
+    test_out = model(test_complex_data, snr)
+    pred = torch.round(torch.sigmoid(test_out))
+    # print(model.accuracy(pred, test_labels))
+    bigmodel.append(1-model.accuracy(pred, test_complex_labels))
 # plt.semilogy(snrs, mean_bers_skip, ls = '-', color = 'b')
 
 plt.semilogy(np.linspace(-5, 10, num=20), berawgn_bers, ls = '-', color = 'g')
 plt.semilogy(snrs, bch_bers, ls = '--', color = 'r')
 plt.semilogy(snrs, bigmodel, ls = '--', color = 'b')
+plt.semilogy(snrs, smallmodel, ls = '--', color = 'orange')
 
 legend_strings = []
 legend_strings.append('Theoretical QPSK')
 legend_strings.append('(128, 64) BCH and QPSK')
 # legend_strings.append('(4,4) Autoencoder, small')
-legend_strings.append('(64,64) Autoencoder')
+legend_strings.append('(8,4) Autoencoder')
+legend_strings.append('(4,4) Autoencoder')
 plt.xlabel('Eb/No')
 plt.ylabel('Bit Error Rate')
 plt.legend(legend_strings, loc = 'lower left')

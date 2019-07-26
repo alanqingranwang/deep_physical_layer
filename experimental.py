@@ -170,6 +170,18 @@ def main():
     optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
 
     for epoch in range(args.epochs):
+        if epoch >= 0 and epoch < 50:
+            dynamic_snr = 15
+        elif epoch >= 50 and epoch < 100:
+            dynamic_snr = 14
+        elif epoch >= 100 and epoch < 150:
+            dynamic_snr = 13
+        elif epoch >= 150 and epoch < 200:
+            dynamic_snr = 12
+        elif epoch >= 200 and epoch < 250:
+            dynamic_snr = 11
+        elif epoch >= 250 and epoch < 300:
+            dynamic_snr = 10
         # if args.lpf_shift_type == 'cont':
         #     cutoff = max(args.lpf_cutoff, (args.epochs-epoch-1)/args.epochs)
         # else:
@@ -181,16 +193,16 @@ def main():
             if 'conv' in name:
                 param.requires_grad = False
 
-        f1, f2 = 0.1, 0.4
-        f3, f4 = 0.5, 0.8
-        taps1 = signal.firwin(args.lpf_num_taps, [f1, f2], pass_zero=False)
-        taps2 = signal.firwin(args.lpf_num_taps, [f3, f4], pass_zero=False)
-        taps = taps1 + taps2
-        filter_real = torch.tensor(taps).float().cuda()
-        filter_imag = torch.zeros(args.lpf_num_taps).view(1, 1, -1).cuda()
+        # f1, f2 = 0.1, 0.4
+        # f3, f4 = 0.5, 0.8
+        # taps1 = signal.firwin(args.lpf_num_taps, [f1, f2], pass_zero=False)
+        # taps2 = signal.firwin(args.lpf_num_taps, [f3, f4], pass_zero=False)
+        # taps = taps1 + taps2
+        # filter_real = torch.tensor(taps).float().cuda()
+        # filter_imag = torch.zeros(args.lpf_num_taps).view(1, 1, -1).cuda()
 
-        model.conv1.conv_real.weight.data = filter_real.view(1, 1, -1)
-        model.conv1.conv_imag.weight.data = filter_imag.view(1, 1, -1)
+        # model.conv1.conv_real.weight.data = filter_real.view(1, 1, -1)
+        # model.conv1.conv_imag.weight.data = filter_imag.view(1, 1, -1)
         cutoff = 0
         # filter_real = torch.randint(20, (args.lpf_num_taps,)).float()
         # filter_imag = torch.randint(20, (args.lpf_num_taps,)).float()
@@ -209,7 +221,7 @@ def main():
             if USE_CUDA:
                 batch = batch.cuda()
                 labels = labels.cuda()
-            output = model(batch)
+            output = model(batch, dynamic_snr)
             loss = loss_fn(output, labels)
 
             optimizer.zero_grad()
@@ -218,7 +230,7 @@ def main():
             if batch_idx % (args.batch_size-1) == 0:
                 pred = torch.round(torch.sigmoid(output))
                 acc = model.accuracy(pred, labels)
-                print('Epoch %2d for SNR %s, shift type %s: loss=%.4f, acc=%.2f' % (epoch, args.snr, args.lpf_shift_type, loss.item(), acc))
+                print('Epoch %2d for SNR %s, shift type %s: loss=%.4f, acc=%.2f' % (epoch, dynamic_snr, args.lpf_shift_type, loss.item(), acc))
                 # loss_list.append(loss.item())
                 # acc_list.append(acc)
 
@@ -247,7 +259,7 @@ def main():
                     test_data = test_data.cuda()
                     test_labels = test_labels.cuda()
                 if epoch % 10 == 0:
-                    val_output = model(test_data)
+                    val_output = model(test_data, args.snr)
                     val_loss = loss_fn(val_output, test_labels)
                     val_pred = torch.round(torch.sigmoid(val_output))
                     val_acc = model.accuracy(val_pred, test_labels)

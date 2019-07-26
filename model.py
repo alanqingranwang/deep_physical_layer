@@ -34,6 +34,7 @@ class Net(nn.Module):
                 nn.BatchNorm1d(block_size),
                 nn.Linear(block_size, block_size)
                 )
+        print(block_size)
 
         self.complex_encoder = nn.Sequential(
                 ComplexLinear(block_size, block_size),
@@ -71,13 +72,15 @@ class Net(nn.Module):
         x = x.view(x.shape[0], -1)
         return x
 
-    def awgn(self, x):
-        snr_lin = 10**(0.1*self.snr)
+    def awgn(self, x, dynamic_snr):
+        snr_lin = 10**(0.1*dynamic_snr)
         rate = self.block_size / self.channel_use
 
         noise = torch.randn(*x.size()) * np.sqrt(1/(2 * rate * snr_lin))
         if self.use_cuda: noise = noise.cuda()
-        x += noise
+        # x += noise
+        x = torch.abs(x)
+        print(x)
         return x
 
     def calc_energy(self, x):
@@ -87,12 +90,12 @@ class Net(nn.Module):
         e = torch.sum(x_sq, dim=1)
         print(e)
 
-    def forward(self, x):
+    def forward(self, x, dynamic_snr):
         x = self.encode(x)
         # self.calc_energy(x)
         if self.use_lpf:
             x = self.lpf(x)
-        x = self.awgn(x)
+        x = self.awgn(x, dynamic_snr)
         # self.calc_energy(x)
         x = self.decode(x)
         # x = self.sig(x) # Sigmoid for BCELoss
