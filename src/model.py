@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from torch.autograd import Variable
 import numpy as np
-from ComplexLinear import ComplexLinear, ComplexConv
+from ComplexLayers import ComplexLinear, ComplexConv
 from scipy.signal import firwin
 
 class Net(nn.Module):
