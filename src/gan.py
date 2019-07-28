@@ -1,3 +1,6 @@
+import torch
+import torch.nn as nn
+
 class Generator(nn.Module):
     def __init__(self, gen_dim):
         super(Generator, self).__init__()
@@ -38,3 +41,9 @@ class Discriminator(nn.Module):
 
     def forward(self, real_or_fake_data):
         return self.model(real_or_fake_data)
+
+    @staticmethod
+    def accuracy(real_data, fake_data):
+        num_diff1 = torch.sum(torch.abs(real_data - torch.ones(real_data.size())))
+        num_diff2 = torch.sum(torch.abs(fake_data - torch.zeros(fake_data.size())))
+        return 1-(num_diff1 + num_diff2) / (real_data.size(0)*real_data.size(1) + fake_data.size(0)*fake_data.size(1))

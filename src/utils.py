@@ -1,3 +1,9 @@
+def calc_energy(self, x):
+    x_comp = x.view(-1, 2, x.shape[1] // 2)
+    x_abs = torch.norm(x_comp, dim=1)
+    x_sq = torch.mul(x_abs, x_abs)
+    e = torch.sum(x_sq, dim=1)
+    print(e)
 
 def create_fft_plots(sample, noise, model, epoch):
     train_code = model.encode(sample.view(1, -1))

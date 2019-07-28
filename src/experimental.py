@@ -10,6 +10,7 @@ from model import Net
 from Dataset import Dataset
 from gan import Discriminator, Generator
 from generate_data import generate_data
+from channel import channel
 
 # Other modules
 import numpy as np
@@ -17,14 +18,11 @@ import matplotlib.pyplot as plt
 plt.switch_backend('agg')
 import pprint
 import imageio
-from pulseshape_lowpass import pulseshape_lowpass
 from tqdm import tqdm
 import itertools
 import argparse
-import time
-import itertools
 import math
-import scipy.signal as signal
+from scipy.signal import firwin
 from sklearn.manifold import TSNE
 
 
@@ -65,122 +63,191 @@ parser.add_argument('-e', '--evaluate', type=str, metavar='FILE',
 parser.add_argument('-s', '--snr', default=7., type=float, metavar='float',
                     help='snr')
 
+def train_receiver(batch, labels, test_data, test_labels, batch_idx, autoencoder, loss_fn, optimizer, epoch, snr, cuda):
+    # Freeze weights of encoder
+    # because decoder is being trained
+    for name, param in autoencoder.named_parameters():
+        if 'encoder' in name:
+            param.requires_grad = False
+        if 'decoder' in name:
+            param.requires_grad = True
+
+    output = autoencoder(batch, epoch, None, snr)
+    loss = loss_fn(output, labels)
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    if batch_idx == 0:
+        pred = torch.round(torch.sigmoid(output))
+        acc = autoencoder.accuracy(pred, labels)
+        print('Epoch %2d for SNR %s: loss=%.4f, acc=%.2f' % (epoch, snr, loss.item(), acc))
+
+        autoencoder.eval()
+
+        # Validation
+        if cuda:
+            test_data = test_data.cuda()
+            test_labels = test_labels.cuda()
+        if epoch % 10 == 0:
+            val_output = autoencoder(test_data, epoch, None, snr)
+            val_loss = loss_fn(val_output, test_labels)
+            val_pred = torch.round(torch.sigmoid(val_output))
+            val_acc = autoencoder.accuracy(val_pred, test_labels)
+            # val_loss_list_normal.append(val_loss)
+            # val_acc_list_normal.append(val_acc)
+            print('Validation: Epoch %2d for SNR %s: loss=%.4f, acc=%.5f' % (epoch, snr, val_loss.item(), val_acc))
+        autoencoder.train()
+    return autoencoder, optimizer
+
+def train_transmitter(batch, labels, test_data, test_labels, batch_idx, autoencoder, channel_model, loss_fn, optimizer, epoch, snr, cuda):
+    # Encoder is being trained...
+    for name, param in autoencoder.named_parameters():
+        if 'decoder' in name:
+            param.requires_grad = False 
+        if 'encoder' in name:
+            param.requires_grad = True
+    # But channel generator model is not
+    for param in channel_model.parameters():
+        param.requires_grad = False
+
+    output = autoencoder(batch, epoch, channel_model, snr)
+    loss = loss_fn(output, labels)
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    if batch_idx == 0:
+        pred = torch.round(torch.sigmoid(output))
+        acc = autoencoder.accuracy(pred, labels)
+        print('Epoch %2d for SNR %s: loss=%.4f, acc=%.4f' % (epoch, snr, loss.item(), acc))
+        # loss_list.append(loss.item())
+        # acc_list.append(acc)
+
+        autoencoder.eval()
+
+        # Create gif of fft
+        # if args.use_complex:
+        #     sample = torch.zeros(args.block_size*2).float()
+        # else:
+        #     sample = torch.zeros(args.block_size).float()
+        # if USE_CUDA: sample = sample.cuda()
+        # create_fft_plots(sample, noise, model, epoch)
+
+        # Save images of constellations
+        # lst = torch.tensor(list(map(list, itertools.product([0, 1], repeat=args.block_size))))
+        # if args.use_complex == True:
+        #     sample_data = torch.zeros((len(lst), args.block_size*2))
+        #     sample_data[:, :args.block_size] = lst
+        # else:
+        #     sample_data = lst
+        # if USE_CUDA: sample_data = sample_data.cuda()
+        # create_constellation_plots(sample_data, args.block_size, args.channel_use, model, args.snr, epoch, USE_CUDA, args.use_complex)
+
+        # Validation
+        if cuda:
+            test_data = test_data.cuda()
+            test_labels = test_labels.cuda()
+        if epoch % 10 == 0:
+            val_output = autoencoder(test_data, epoch, channel_model, snr)
+            val_loss = loss_fn(val_output, test_labels)
+            val_pred = torch.round(torch.sigmoid(val_output))
+            val_acc = autoencoder.accuracy(val_pred, test_labels)
+            # val_loss_list_normal.append(val_loss)
+            # val_acc_list_normal.append(val_acc)
+            print('Validation: Epoch %2d for SNR %s: loss=%.4f, acc=%.5f' % (epoch, snr, val_loss.item(), val_acc))
+        autoencoder.train()
+    return autoencoder, optimizer
+
+def train_channel(batch, batch_idx, epoch, generator, discriminator, channel_use, adversarial_loss, optimizer_G, optimizer_D, n_epochs, snr, cuda):
+    for param in generator.parameters():
+        param.requires_grad = True
+
+    Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
+    # Adversarial ground truths
+    valid = Variable(Tensor(batch.size(0), 1).fill_(1.0), requires_grad=False)
+    fake = Variable(Tensor(batch.size(0), 1).fill_(0.0), requires_grad=False)
+
+    # Configure input
+    real_codes = channel(batch, channel_use, snr)
+
+    # -----------------
+    #  Train Generator
+    # -----------------
+    optimizer_G.zero_grad()
+    # Generate a batch of images
+    gen_codes = generator(batch)
+
+    # Loss measures generator's ability to fool the discriminator
+    g_loss = adversarial_loss(discriminator(gen_codes), valid)
+    g_loss.backward()
+    optimizer_G.step()
+    # ---------------------
+    #  Train Discriminator
+    # ---------------------
+    optimizer_D.zero_grad()
+    # Measure discriminator's ability to classify real from generated samples
+    real_loss = adversarial_loss(discriminator(real_codes), valid)
+    fake_loss = adversarial_loss(discriminator(gen_codes.detach()), fake)
+    d_loss = (real_loss + fake_loss) / 2
+    d_acc = discriminator.accuracy(real_codes, gen_codes)
+
+    d_loss.backward()
+    optimizer_D.step()
+
+    if batch_idx == 0:
+        print("[Epoch %d/%d] [D loss: %f] [G loss: %f]"
+                % (epoch, n_epochs, d_loss.item(), g_loss.item()))
+
+    return generator, discriminator, optimizer_G, optimizer_D
+
+
 def main():
-    args = parser.parseargs()
+    args = parser.parse_args()
     pprint.pprint(vars(args))
 
-    USE_CUDA = torch.cuda.is_available()
+    cuda = torch.cuda.is_available()
     train_data, train_labels, test_data, test_labels = generate_data(args.block_size, args.use_complex)
 
     # Data loading
     params = {'batch_size': args.batch_size,
               'shuffle': True,
               'num_workers': args.workers}
-    training_loader = torch.utils.data.DataLoader(Dataset(train_data, train_labels), **params)
-    loss_fn = nn.BCEWithLogitsLoss()
+    dataset = Dataset(train_data, train_labels)
+    training_loader = torch.utils.data.DataLoader(dataset, **params)
+    autoencoder_loss = nn.BCEWithLogitsLoss()
+    gan_loss = torch.nn.BCELoss()
 
     # Training
-    val_loss_list_normal = []
-    val_acc_list_normal = []
+    # val_loss_list_normal = []
+    # val_acc_list_normal = []
 
-    autoencoder = Net(channel_use=args.channel_use, block_size=args.block_size, snr=args.snr, use_cuda=USE_CUDA, use_lpf=args.use_lpf, use_complex = args.use_complex, lpf_num_taps=args.lpf_num_taps, dropout_rate=args.dropout_rate)
+    autoencoder = Net(channel_use=args.channel_use, block_size=args.block_size, snr=args.snr, use_cuda=cuda, use_lpf=args.use_lpf, use_complex = args.use_complex, lpf_num_taps=args.lpf_num_taps, dropout_rate=args.dropout_rate)
 
-    generator = Generator(channel_use)
-    discriminator = Discriminator(channel_use)
+    generator = Generator(args.channel_use)
+    discriminator = Discriminator(args.channel_use)
 
-    if USE_CUDA:
+    if cuda:
         autoencoder = autoencoder.cuda()
         generator = generator.cuda()
         discriminator = discriminator.cuda()
 
-    optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
+    optimizer = Adam(filter(lambda p: p.requires_grad, autoencoder.parameters()), lr=args.lr)
+    optimizer_G = torch.optim.Adam(generator.parameters(), lr=args.lr)
+    optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=args.lr)
 
     for epoch in range(args.epochs):
-        # if args.lpf_shift_type == 'cont':
-        #     cutoff = max(args.lpf_cutoff, (args.epochs-epoch-1)/args.epochs)
-        # else:
-        #     if epoch % (args.epochs / 10) == 0:
-        #         cutoff = max(args.lpf_cutoff, (args.epochs-epoch-1)/args.epochs)
-
-
-        for name, param in model.named_parameters():
-            if 'conv' in name:
-                param.requires_grad = False
-
-        # filter_real = torch.randint(20, (args.lpf_num_taps,)).float()
-        # filter_imag = torch.randint(20, (args.lpf_num_taps,)).float()
-        # if USE_CUDA:
-        #     filter_real = filter_real.cuda()
-        #     filter_imag = filter_imag.cuda()
-        # filter_comp = torch.stack((filter_real, filter_imag), dim=1)
-        # fft = torch.ifft(filter_comp, 1)
-        # # model.conv1.conv_real.weight.data = filter_real.view(1, 1, -1)
-        # # model.conv1.conv_imag.weight.data = filter_imag.view(1, 1, -1)
-        # model.conv1.conv_real.weight.data = fft[:, 0].view(1, 1, -1)
-        # model.conv1.conv_imag.weight.data = fft[:, 1].view(1, 1, -1)
-
-        model.train()
-        for batch_idx, (batch, labels) in tqdm(enumerate(training_loader), total=int(training_set.__len__()/args.batch_size)):
-            if USE_CUDA:
+        autoencoder.train()
+        generator.train()
+        discriminator.train()
+        for batch_idx, (batch, labels) in tqdm(enumerate(training_loader), total=int(dataset.__len__()/args.batch_size)):
+            if cuda:
                 batch = batch.cuda()
                 labels = labels.cuda()
-            output, noise = model(batch, epoch)
-            loss = loss_fn(output, labels)
 
-            train_receiver()
+            autoencoder, optimizer = train_receiver(batch, labels, test_data, test_labels, batch_idx, autoencoder, autoencoder_loss, optimizer, epoch, args.snr, cuda)
 
-            train_transmitter()
+            autoencoder, optimizer = train_transmitter(batch, labels, test_data, test_labels, batch_idx, autoencoder, generator, autoencoder_loss, optimizer, epoch, args.snr, cuda)
 
-            train_channel()
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            if batch_idx % (args.batch_size-1) == 0:
-                pred = torch.round(torch.sigmoid(output))
-                acc = model.accuracy(pred, labels)
-                print('Epoch %2d for SNR %s, shift type %s: loss=%.4f, acc=%.2f' % (epoch, args.snr, args.lpf_shift_type, loss.item(), acc))
-                # loss_list.append(loss.item())
-                # acc_list.append(acc)
-
-
-                model.eval()
-
-                # Create gif of fft
-                if args.use_complex:
-                    sample = torch.zeros(args.block_size*2).float()
-                else:
-                    sample = torch.zeros(args.block_size).float()
-                if USE_CUDA: sample = sample.cuda()
-                create_fft_plots(sample, noise, model, epoch)
-
-                # Save images of constellations
-                # lst = torch.tensor(list(map(list, itertools.product([0, 1], repeat=args.block_size))))
-                # if args.use_complex == True:
-                #     sample_data = torch.zeros((len(lst), args.block_size*2))
-                #     sample_data[:, :args.block_size] = lst
-                # else:
-                #     sample_data = lst
-                # if USE_CUDA: sample_data = sample_data.cuda()
-                # create_constellation_plots(sample_data, args.block_size, args.channel_use, model, args.snr, epoch, USE_CUDA, args.use_complex)
-
-                # Validation
-                if USE_CUDA:
-                    test_data = test_data.cuda()
-                    test_labels = test_labels.cuda()
-                if epoch % 10 == 0:
-                    val_output, _ = model(test_data, epoch)
-                    val_loss = loss_fn(val_output, test_labels)
-                    val_pred = torch.round(torch.sigmoid(val_output))
-                    val_acc = model.accuracy(val_pred, test_labels)
-                    # val_loss_list_normal.append(val_loss)
-                    # val_acc_list_normal.append(val_acc)
-                    print('Validation: Epoch %2d for SNR %s: loss=%.4f, acc=%.5f' % (epoch, args.snr, val_loss.item(), val_acc))
-                model.train()
-        if args.use_complex:
-            torch.save(model.state_dict(), './models/complex_(%s,%s)_%s' % (str(args.channel_use), str(args.block_size), str(args.snr)))
-        else:
-            torch.save(model.state_dict(), './models/real_(%s,%s)_%s' % (str(args.channel_use), str(args.block_size), str(args.snr)))
+            generator, discriminator, optimizer_G, optimizer_D = train_channel(batch, batch_idx, epoch, generator, discriminator, args.channel_use, gan_loss, optimizer_G, optimizer_D, args.epochs, args.snr, cuda)
 
 if __name__ == "__main__":
     main()

@@ -1,3 +1,5 @@
+import torch
+
 def generate_data(block_size, use_complex):
     train_data = torch.randint(2, (10000, block_size)).float()
     test_data = torch.randint(2, (2500, block_size)).float()

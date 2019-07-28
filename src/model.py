@@ -4,6 +4,7 @@ from torch.autograd import Variable
 import numpy as np
 from ComplexLayers import ComplexLinear, ComplexConv
 from scipy.signal import firwin
+from channel import channel
 
 class Net(nn.Module):
     def __init__(self, channel_use, block_size, snr, use_cuda=True, use_lpf=True, use_complex=False, lpf_num_taps=100, dropout_rate=0):
@@ -67,52 +68,42 @@ class Net(nn.Module):
             x = self.decoder(x)
         return x
 
-    def lpf(self, x):
-        x = torch.unsqueeze(x, 1)
-        x = self.conv1(x)
-        x = x.view(x.shape[0], -1)
-        return x
+    # def channel(self, x, epoch):
+    #     with torch.no_grad:
+    #         if epoch >= 0 and epoch < 75:
+    #             f1, f2 = 0.4, 0.6
+    #         elif epoch >= 75 and epoch < 150:
+    #             f1, f2 = 0.1, 0.4
+    #         else:
+    #             f1, f2 = 0.5, 0.9
 
-    def awgn(self, x, epoch):
-        if epoch >= 0 and epoch < 75:
-            f1, f2 = 0.4, 0.6
-        elif epoch >= 75 and epoch < 150:
-            f1, f2 = 0.1, 0.4
-        else:
-            f1, f2 = 0.5, 0.9
+    #         print(f1, f2)
+    #         awgn_filter = firwin(32, [f1, f2], pass_zero=False)
 
-        print(f1, f2)
-        awgn_filter = firwin(32, [f1, f2], pass_zero=False)
+    #         snr_lin = 10**(0.1*self.snr)
+    #         rate = self.block_size / self.channel_use
+    #         noise = torch.randn(*x.size()) * np.sqrt(1/(2 * rate * snr_lin))
 
-        snr_lin = 10**(0.1*self.snr)
-        rate = self.block_size / self.channel_use
-        noise = torch.randn(*x.size()) * np.sqrt(1/(2 * rate * snr_lin))
+    #         noise_cpu = noise.detach().numpy()
+    #         noise_clipped = np.convolve(awgn_filter, noise_cpu[0], 'same')
+    #         noise_clipped = torch.tensor(noise_clipped).float().cuda()
+    #         x += noise_clipped
+    #     return x, noise_clipped
 
-        noise_cpu = noise.detach().numpy()
-        noise_clipped = np.convolve(awgn_filter, noise_cpu[0], 'same')
-        noise_clipped = torch.tensor(noise_clipped).float().cuda()
-        x += noise_clipped
-        return x, noise_clipped
-
-    def calc_energy(self, x):
-        x_comp = x.view(-1, 2, x.shape[1] // 2)
-        x_abs = torch.norm(x_comp, dim=1)
-        x_sq = torch.mul(x_abs, x_abs)
-        e = torch.sum(x_sq, dim=1)
-        print(e)
-
-    def forward(self, x, epoch):
+    def forward(self, x, epoch, channel_model, channel_snr):
         x = self.encode(x)
-        if self.use_lpf:
-            x = self.lpf(x)
-        x, noise = self.awgn(x, epoch)
+        if channel_model == None: # Training receiver, use true channel
+            x = channel(x, self.channel_use, channel_snr)
+        else: # Training transmitter, use generator
+            x = channel_model(x)
+
         x = self.decode(x)
-        return x, noise
+        return x 
 
     @staticmethod
     def accuracy(preds, labels):
         # block-wise accuracy
-        acc1 = torch.sum((torch.sum(torch.abs(preds-labels), 1)==0)).item()/(list(preds.size())[0])
+        # acc1 = torch.sum((torch.sum(torch.abs(preds-labels), 1)==0)).item()/(list(preds.size())[0])
         # bit-wise accuracy
         acc2 = 1 - torch.sum(torch.abs(preds-labels)).item() / (list(preds.size())[0]*list(preds.size())[1])
         return acc2
