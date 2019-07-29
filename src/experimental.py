@@ -77,25 +77,23 @@ def train_receiver(batch, labels, test_data, test_labels, batch_idx, autoencoder
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
+
     if batch_idx == 0:
         pred = torch.round(torch.sigmoid(output))
         acc = autoencoder.accuracy(pred, labels)
         print('Epoch %2d for SNR %s: loss=%.4f, acc=%.2f' % (epoch, snr, loss.item(), acc))
 
-        autoencoder.eval()
+        # autoencoder.eval()
 
         # Validation
-        if cuda:
-            test_data = test_data.cuda()
-            test_labels = test_labels.cuda()
-        if epoch % 10 == 0:
-            val_output = autoencoder(test_data, epoch, None, snr, cuda)
-            val_loss = loss_fn(val_output, test_labels)
-            val_pred = torch.round(torch.sigmoid(val_output))
-            val_acc = autoencoder.accuracy(val_pred, test_labels)
-            # val_loss_list_normal.append(val_loss)
-            # val_acc_list_normal.append(val_acc)
-            print('Validation: Epoch %2d for SNR %s: loss=%.4f, acc=%.5f' % (epoch, snr, val_loss.item(), val_acc))
+        # if epoch % 10 == 0:
+        #     val_output = autoencoder(test_data, epoch, None, snr, cuda)
+        #     val_loss = loss_fn(val_output, test_labels)
+        #     val_pred = torch.round(torch.sigmoid(val_output))
+        #     val_acc = autoencoder.accuracy(val_pred, test_labels)
+        #     # val_loss_list_normal.append(val_loss)
+        #     # val_acc_list_normal.append(val_acc)
+        #     print('Validation: Epoch %2d for SNR %s: loss=%.4f, acc=%.5f' % (epoch, snr, val_loss.item(), val_acc))
         autoencoder.train()
     return autoencoder, optimizer
 
@@ -122,38 +120,17 @@ def train_transmitter(batch, labels, test_data, test_labels, batch_idx, autoenco
         # loss_list.append(loss.item())
         # acc_list.append(acc)
 
-        autoencoder.eval()
-
-        # Create gif of fft
-        # if args.use_complex:
-        #     sample = torch.zeros(args.block_size*2).float()
-        # else:
-        #     sample = torch.zeros(args.block_size).float()
-        # if USE_CUDA: sample = sample.cuda()
-        # create_fft_plots(sample, noise, model, epoch)
-
-        # Save images of constellations
-        # lst = torch.tensor(list(map(list, itertools.product([0, 1], repeat=args.block_size))))
-        # if args.use_complex == True:
-        #     sample_data = torch.zeros((len(lst), args.block_size*2))
-        #     sample_data[:, :args.block_size] = lst
-        # else:
-        #     sample_data = lst
-        # if USE_CUDA: sample_data = sample_data.cuda()
-        # create_constellation_plots(sample_data, args.block_size, args.channel_use, model, args.snr, epoch, USE_CUDA, args.use_complex)
+        # autoencoder.eval()
 
         # Validation
-        if cuda:
-            test_data = test_data.cuda()
-            test_labels = test_labels.cuda()
-        if epoch % 10 == 0:
-            val_output = autoencoder(test_data, epoch, channel_model, snr, cuda)
-            val_loss = loss_fn(val_output, test_labels)
-            val_pred = torch.round(torch.sigmoid(val_output))
-            val_acc = autoencoder.accuracy(val_pred, test_labels)
-            # val_loss_list_normal.append(val_loss)
-            # val_acc_list_normal.append(val_acc)
-            print('Validation: Epoch %2d for SNR %s: loss=%.4f, acc=%.5f' % (epoch, snr, val_loss.item(), val_acc))
+        # if epoch % 10 == 0:
+        #     val_output = autoencoder(test_data, epoch, channel_model, snr, cuda)
+        #     val_loss = loss_fn(val_output, test_labels)
+        #     val_pred = torch.round(torch.sigmoid(val_output))
+        #     val_acc = autoencoder.accuracy(val_pred, test_labels)
+        #     # val_loss_list_normal.append(val_loss)
+        #     # val_acc_list_normal.append(val_acc)
+        #     print('Validation: Epoch %2d for SNR %s: loss=%.4f, acc=%.5f' % (epoch, snr, val_loss.item(), val_acc))
         autoencoder.train()
     return autoencoder, optimizer
 
@@ -199,6 +176,13 @@ def train_channel(batch, batch_idx, epoch, generator, discriminator, channel_use
 
     return generator, discriminator, optimizer_G, optimizer_D
 
+def validation(autoencoder, test_data, test_labels, epoch, snr, cuda):
+    autoencoder.eval()
+    out = autoencoder(test_data, epoch, None, snr, cuda)
+    val_pred = torch.round(torch.sigmoid(out))
+    val_acc = autoencoder.accuracy(val_pred, test_labels)
+    print('     Validation: Epoch %2d for SNR %s: acc=%.5f' % (epoch, snr, val_acc))
+    autoencoder.train()
 
 def main():
     args = parser.parse_args()
@@ -229,6 +213,8 @@ def main():
         autoencoder = autoencoder.cuda()
         generator = generator.cuda()
         discriminator = discriminator.cuda()
+        test_data = test_data.cuda()
+        test_labels = test_labels.cuda()
 
     optimizer = Adam(filter(lambda p: p.requires_grad, autoencoder.parameters()), lr=args.lr)
     optimizer_G = torch.optim.Adam(generator.parameters(), lr=args.lr)
@@ -243,11 +229,21 @@ def main():
                 batch = batch.cuda()
                 labels = labels.cuda()
 
-            # autoencoder, optimizer = train_receiver(batch, labels, test_data, test_labels, batch_idx, autoencoder, autoencoder_loss, optimizer, epoch, args.snr, cuda)
+            if epoch % 3 == 0:
+                autoencoder, optimizer = train_receiver(batch, labels, test_data, test_labels, batch_idx, autoencoder, autoencoder_loss, optimizer, epoch, args.snr, cuda)
+            # print('after receiver')
+            # for name, param in autoencoder.named_parameters():
+            #     print(name, param.requires_grad)
+            if epoch % 3 == 1:
+                autoencoder, optimizer = train_transmitter(batch, labels, test_data, test_labels, batch_idx, autoencoder, generator, autoencoder_loss, optimizer, epoch, args.snr, cuda)
+            # print('after transmitter')
+            # for name, param in autoencoder.named_parameters():
+            #     print(name, param.requires_grad)
+            if epoch % 3 == 2:
+                generator, discriminator, optimizer_G, optimizer_D = train_channel(batch, batch_idx, epoch, generator, discriminator, args.channel_use, gan_loss, optimizer_G, optimizer_D, args.epochs, args.snr, cuda)
 
-            autoencoder, optimizer = train_transmitter(batch, labels, test_data, test_labels, batch_idx, autoencoder, generator, autoencoder_loss, optimizer, epoch, args.snr, cuda)
-
-            # generator, discriminator, optimizer_G, optimizer_D = train_channel(batch, batch_idx, epoch, generator, discriminator, args.channel_use, gan_loss, optimizer_G, optimizer_D, args.epochs, args.snr, cuda)
+            if epoch % 10 == 0 and batch_idx == 0:
+                validation(autoencoder, test_data, test_labels, epoch, args.snr, cuda)
 
 if __name__ == "__main__":
     main()
