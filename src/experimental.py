@@ -194,8 +194,8 @@ def train_channel(batch, batch_idx, epoch, generator, discriminator, channel_use
     optimizer_D.step()
 
     if batch_idx == 0:
-        print("[Epoch %d/%d] [D loss: %f] [G loss: %f]"
-                % (epoch, n_epochs, d_loss.item(), g_loss.item()))
+        print("[Epoch %d/%d] [D loss: %f] [G loss: %f] [D acc: %f]"
+                % (epoch, n_epochs, d_loss.item(), g_loss.item(), d_acc))
 
     return generator, discriminator, optimizer_G, optimizer_D
 
