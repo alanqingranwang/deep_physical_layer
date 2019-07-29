@@ -72,7 +72,7 @@ def train_receiver(batch, labels, test_data, test_labels, batch_idx, autoencoder
         if 'decoder' in name:
             param.requires_grad = True
 
-    output = autoencoder(batch, epoch, None, snr)
+    output = autoencoder(batch, epoch, None, snr, cuda)
     loss = loss_fn(output, labels)
     optimizer.zero_grad()
     loss.backward()
@@ -89,7 +89,7 @@ def train_receiver(batch, labels, test_data, test_labels, batch_idx, autoencoder
             test_data = test_data.cuda()
             test_labels = test_labels.cuda()
         if epoch % 10 == 0:
-            val_output = autoencoder(test_data, epoch, None, snr)
+            val_output = autoencoder(test_data, epoch, None, snr, cuda)
             val_loss = loss_fn(val_output, test_labels)
             val_pred = torch.round(torch.sigmoid(val_output))
             val_acc = autoencoder.accuracy(val_pred, test_labels)
@@ -103,14 +103,14 @@ def train_transmitter(batch, labels, test_data, test_labels, batch_idx, autoenco
     # Encoder is being trained...
     for name, param in autoencoder.named_parameters():
         if 'decoder' in name:
-            param.requires_grad = False 
+            param.requires_grad = False
         if 'encoder' in name:
             param.requires_grad = True
     # But channel generator model is not
     for param in channel_model.parameters():
         param.requires_grad = False
 
-    output = autoencoder(batch, epoch, channel_model, snr)
+    output = autoencoder(batch, epoch, channel_model, snr, cuda)
     loss = loss_fn(output, labels)
     optimizer.zero_grad()
     loss.backward()
@@ -147,7 +147,7 @@ def train_transmitter(batch, labels, test_data, test_labels, batch_idx, autoenco
             test_data = test_data.cuda()
             test_labels = test_labels.cuda()
         if epoch % 10 == 0:
-            val_output = autoencoder(test_data, epoch, channel_model, snr)
+            val_output = autoencoder(test_data, epoch, channel_model, snr, cuda)
             val_loss = loss_fn(val_output, test_labels)
             val_pred = torch.round(torch.sigmoid(val_output))
             val_acc = autoencoder.accuracy(val_pred, test_labels)
@@ -167,7 +167,7 @@ def train_channel(batch, batch_idx, epoch, generator, discriminator, channel_use
     fake = Variable(Tensor(batch.size(0), 1).fill_(0.0), requires_grad=False)
 
     # Configure input
-    real_codes = channel(batch, channel_use, snr)
+    real_codes = channel(batch, channel_use, snr, cuda)
 
     # -----------------
     #  Train Generator
@@ -188,7 +188,7 @@ def train_channel(batch, batch_idx, epoch, generator, discriminator, channel_use
     real_loss = adversarial_loss(discriminator(real_codes), valid)
     fake_loss = adversarial_loss(discriminator(gen_codes.detach()), fake)
     d_loss = (real_loss + fake_loss) / 2
-    d_acc = discriminator.accuracy(real_codes, gen_codes)
+    d_acc = discriminator.accuracy(real_codes, gen_codes, cuda)
 
     d_loss.backward()
     optimizer_D.step()
@@ -243,11 +243,11 @@ def main():
                 batch = batch.cuda()
                 labels = labels.cuda()
 
-            autoencoder, optimizer = train_receiver(batch, labels, test_data, test_labels, batch_idx, autoencoder, autoencoder_loss, optimizer, epoch, args.snr, cuda)
+            # autoencoder, optimizer = train_receiver(batch, labels, test_data, test_labels, batch_idx, autoencoder, autoencoder_loss, optimizer, epoch, args.snr, cuda)
 
             autoencoder, optimizer = train_transmitter(batch, labels, test_data, test_labels, batch_idx, autoencoder, generator, autoencoder_loss, optimizer, epoch, args.snr, cuda)
 
-            generator, discriminator, optimizer_G, optimizer_D = train_channel(batch, batch_idx, epoch, generator, discriminator, args.channel_use, gan_loss, optimizer_G, optimizer_D, args.epochs, args.snr, cuda)
+            # generator, discriminator, optimizer_G, optimizer_D = train_channel(batch, batch_idx, epoch, generator, discriminator, args.channel_use, gan_loss, optimizer_G, optimizer_D, args.epochs, args.snr, cuda)
 
 if __name__ == "__main__":
     main()
