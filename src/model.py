@@ -22,8 +22,7 @@ class Net(nn.Module):
         else:
             dec_hidden_dim = channel_use
 
-        self.conv1 = ComplexConv(lpf_num_taps, padding=lpf_num_taps-1)
-        self.sig = nn.Sigmoid()
+        # self.conv1 = ComplexConv(lpf_num_taps, padding=lpf_num_taps-1)
 
         self.encoder = nn.Sequential(
                 nn.Linear(block_size, block_size),
@@ -38,16 +37,16 @@ class Net(nn.Module):
                 nn.Linear(block_size, block_size)
                 )
 
-        self.complex_encoder = nn.Sequential(
-                ComplexLinear(block_size, block_size),
-                nn.PReLU(),
-                ComplexLinear(block_size, channel_use)
-                )
-        self.complex_decoder = nn.Sequential(
-                ComplexLinear(dec_hidden_dim, block_size),
-                nn.PReLU(),
-                ComplexLinear(block_size, block_size)
-                )
+        # self.complex_encoder = nn.Sequential(
+        #         ComplexLinear(block_size, block_size),
+        #         nn.PReLU(),
+        #         ComplexLinear(block_size, channel_use)
+        #         )
+        # self.complex_decoder = nn.Sequential(
+        #         ComplexLinear(dec_hidden_dim, block_size),
+        #         nn.PReLU(),
+        #         ComplexLinear(block_size, block_size)
+        #         )
 
     def encode(self, x):
         if self.use_complex:

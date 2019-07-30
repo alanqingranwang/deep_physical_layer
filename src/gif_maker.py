@@ -1,69 +1,52 @@
 import imageio
 import matplotlib.pyplot as plt
+plt.switch_backend('agg')
 import os
 import glob
-import itertools
-import torch
-from experimental import Net
+import numpy as np
 
-FFT_PATH = './results/images/fft_none/'
-FFTshift_PATH = './results/images/fft_shift/'
-CONSTELLATION_PATH = './results/images/constellation/'
-AWGN_PATH = './results/images/awgn_pics/'
-fft_images = []
-fft_shift_images = []
-const_images = []
-awgn_images = []
-# files = glob.glob(FFT_PATH + '*.png')
-# files = sorted(files)
-# print(files)
-# for filename in files:
-#     fft_images.append(imageio.imread(filename))
-# imageio.mimsave('./results/gifs/fft_none.gif', fft_images)
+ALLY_PATH = '../results/images/ally_pics/'
+ALLY_PATH1 = '../results/images/ally_pics1/'
+ally_images = []
+ally_images1 = []
 
-# files = glob.glob(FFTshift_PATH + '*.png')
-# files = sorted(files)
-# print(files)
-# for filename in files:
-#     fft_shift_images.append(imageio.imread(filename))
-# imageio.mimsave('./results/gifs/fft_shift.gif', fft_shift_images)
+loss = np.loadtxt('./loss.dat', delimiter = ',')
+rate = np.loadtxt('./rate.dat', delimiter = ',')
+print(rate.shape)
+print(loss.shape)
+for i in range(len(loss)):
+    fig = plt.figure()
+    plt.plot(loss[:i, 0], loss[:i, 1])
+    plt.title('Loss')
+    plt.ylabel('Loss Fraction')
+    plt.xlabel('Time (sec)')
+    plt.ylim([0, 1.1])
+    plt.xlim([0, 60])
+    plt.savefig(ALLY_PATH + str(i).zfill(3))
+    fig.clf()
+    plt.close()
 
-# files = glob.glob(CONSTELLATION_PATH + '*.png')
-# files = sorted(files)
-# for filename in files:
-#     const_images.append(imageio.imread(filename))
-# imageio.mimsave('./results/gifs/const.gif', const_images)
-
-files = glob.glob(AWGN_PATH + '*.png')
+files = glob.glob(ALLY_PATH + '*.png')
 files = sorted(files)
 print(files)
 for filename in files:
-    awgn_images.append(imageio.imread(filename))
-imageio.mimsave('./results/gifs/awgn.gif', awgn_images)
-# block_size = 4
-# channel_use = 2
-# USE_CUDA = True
-# snr = 8
+    ally_images.append(imageio.imread(filename))
+imageio.mimsave('./ally_loss.gif', ally_images)
 
-# lst = torch.tensor(list(map(list, itertools.product([-1, 1], repeat=block_size)))).cuda()
-# sample_data = torch.zeros((len(lst), block_size*2)).cuda()
-# sample_data[:, :block_size] = lst
-# model = Net(channel_use=channel_use, block_size=block_size, snr=-5, use_cuda=USE_CUDA, use_lpf=False, use_complex=True, dropout_rate=0)
-# model.load_state_dict(torch.load('./models/4_2_' + str(snr) + '.0'))
-# model.eval()
-# if USE_CUDA: model = model.cuda()
-
-# train_codes = model.encode(sample_data)
-# print(train_codes.size())
-# train_codes_cpu = train_codes.cpu().detach().numpy()
-
-# for i in range(channel_use):
-#     fig = plt.figure()
-
-#     plt.scatter(train_codes_cpu[:,i], train_codes_cpu[:,i + channel_use])
-#     plt.xlim([-2, 2])
-#     plt.ylim([-2, 2])
-#     plt.title('SNR %s, Constellation %s' % (str(snr), str(i)))
-#     plt.savefig('results/images/constellation/const_%s.png' % (str(i)))
-#     fig.clf()
-#     plt.close()
+for i in range(len(rate)):
+    fig = plt.figure()
+    plt.plot(rate[:i, 0], rate[:i, 1])
+    plt.title('Rate')
+    plt.ylabel('Rate (kbps)')
+    plt.xlabel('Time (sec)')
+    plt.ylim([0, 1000])
+    plt.xlim([0, 60])
+    plt.savefig(ALLY_PATH1 + str(i).zfill(3))
+    fig.clf()
+    plt.close()
+files = glob.glob(ALLY_PATH1 + '*.png')
+files = sorted(files)
+print(files)
+for filename in files:
+    ally_images1.append(imageio.imread(filename))
+imageio.mimsave('./ally_rate.gif', ally_images1)
