@@ -205,16 +205,28 @@ def train_with_learned_generator(batch, labels, batch_idx, autoencoder, channel_
     loss.backward()
     optimizer.step()
 
+    pred = torch.round(torch.sigmoid(output))
+    acc = autoencoder.accuracy(pred, labels)
     if batch_idx == 0:
-        pred = torch.round(torch.sigmoid(output))
-        acc = autoencoder.accuracy(pred, labels)
         print('LEARNED GENERATOR, Epoch %2d for SNR %s: loss=%.4f, acc=%.4f' % (epoch, snr, loss.item(), acc))
-        # loss_list.append(loss.item())
-        # acc_list.append(acc)
-
         autoencoder.train()
     # print_decoder_weights('RIGHT BEFORE EXITING TRANSMITTER', autoencoder)
-    return autoencoder, optimizer
+    return autoencoder, optimizer, acc
+
+def train_with_channel(batch, labels, batch_idx, autoencoder, loss_fn, optimizer, epoch, snr, cuda):
+    output = autoencoder(batch, epoch, None, snr, cuda)
+    loss = loss_fn(output, labels)
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    pred = torch.round(torch.sigmoid(output))
+    acc = autoencoder.accuracy(pred, labels)
+    if batch_idx == 0:
+        print('ACTUAL CHANNEL, Epoch %2d for SNR %s: loss=%.4f, acc=%.4f' % (epoch, snr, loss.item(), acc))
+
+    return autoencoder, optimizer, acc
+
 def validation(autoencoder, test_data, test_labels, epoch, snr, cuda):
     autoencoder.eval()
     out = autoencoder(test_data, epoch, None, snr, cuda)
@@ -259,6 +271,7 @@ def main():
 
 
     autoencoder = Net(channel_use=args.channel_use, block_size=args.block_size, snr=args.snr, use_cuda=cuda, use_lpf=args.use_lpf, use_complex = args.use_complex, lpf_num_taps=args.lpf_num_taps, dropout_rate=args.dropout_rate)
+    autoencoder1 = Net(channel_use=args.channel_use, block_size=args.block_size, snr=args.snr, use_cuda=cuda, use_lpf=args.use_lpf, use_complex = args.use_complex, lpf_num_taps=args.lpf_num_taps, dropout_rate=args.dropout_rate)
 
     generator = Generator(args.channel_use)
     generator.load_state_dict(torch.load('../models/generator'))
@@ -268,11 +281,13 @@ def main():
     # discriminator = Discriminator(args.channel_use)
 
     # optimizer = Adam(filter(lambda p: p.requires_grad, autoencoder.parameters()), lr=args.lr)
-    optimizer = Adam(autoencoder.parameters(), lr=args.lr)
+    optimizer = Adam(filter(lambda p: p.requires_grad, autoencoder.parameters()), lr=args.lr)
+    optimizer1 = Adam(filter(lambda p: p.requires_grad, autoencoder1.parameters()), lr=args.lr)
     # optimizer_G = torch.optim.Adam(generator.parameters(), lr=args.lr)
     # optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=args.lr)
 
-    acc_list = []
+    learned_acc_list = []
+    channel_acc_list = []
     for epoch in range(args.epochs):
         autoencoder.train()
         # generator.train()
@@ -286,7 +301,10 @@ def main():
 
             # autoencoder, optimizer = train_transmitter(batch, labels, batch_idx, autoencoder, generator, autoencoder_loss, optimizer, epoch, args.snr, cuda)
 
-            train_with_learned_generator(batch, labels, batch_idx, autoencoder, generator, autoencoder_loss, optimizer, epoch, args.snr, cuda)
+            autoencoder, optimizer, learned_acc = train_with_learned_generator(batch, labels, batch_idx, autoencoder, generator, autoencoder_loss, optimizer, epoch, args.snr, cuda)
+            autoencoder1, optimizer1, channel_acc = train_with_channel(batch, labels, batch_idx, autoencoder1, autoencoder_loss, optimizer1, epoch, args.snr, cuda)
+            learned_acc_list.append(learned_acc)
+            channel_acc_list.append(channel_acc)
             # generator, discriminator, optimizer_G, optimizer_D = train_channel(batch, batch_idx, epoch, generator, discriminator, args.channel_use, gan_loss, optimizer_G, optimizer_D, args.epochs, args.snr, cuda)
 
 
@@ -294,7 +312,9 @@ def main():
             #     acc = validation(autoencoder, test_data, test_labels, epoch, args.snr, cuda)
             #     acc_list.append(acc)
 
-    torch.save(generator.state_dict(), '../models/generator')
+    plt.plot(learned_acc_list)
+    plt.plot(channel_acc_list)
+    plt.savefig('./compare_channels.png')
 
 if __name__ == "__main__":
     main()
