@@ -3,6 +3,7 @@ from torch import nn
 from torch.autograd import Variable
 import numpy as np
 from ComplexLinear import ComplexLinear, ComplexConv
+from channel import channel
 
 class Net(nn.Module):
     def __init__(self, channel_use, block_size, snr, use_cuda=True, use_lpf=True, use_complex=False, lpf_num_taps=100, dropout_rate=0):
@@ -78,9 +79,7 @@ class Net(nn.Module):
 
         noise = torch.randn(*x.size()) * np.sqrt(1/(2 * rate * snr_lin))
         if self.use_cuda: noise = noise.cuda()
-        # x += noise
-        x = torch.abs(x)
-        print(x)
+        x += noise
         return x
 
     def calc_energy(self, x):
@@ -90,15 +89,12 @@ class Net(nn.Module):
         e = torch.sum(x_sq, dim=1)
         print(e)
 
-    def forward(self, x, dynamic_snr):
+    def forward(self, x, dynamic_snr, cuda):
         x = self.encode(x)
-        # self.calc_energy(x)
         if self.use_lpf:
             x = self.lpf(x)
-        x = self.awgn(x, dynamic_snr)
-        # self.calc_energy(x)
+        x = channel(x, self.channel_use, dynamic_snr, cuda)
         x = self.decode(x)
-        # x = self.sig(x) # Sigmoid for BCELoss
         return x
 
     @staticmethod

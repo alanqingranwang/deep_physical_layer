@@ -221,7 +221,7 @@ def main():
             if USE_CUDA:
                 batch = batch.cuda()
                 labels = labels.cuda()
-            output = model(batch, dynamic_snr)
+            output = model(batch, args.snr, USE_CUDA)
             loss = loss_fn(output, labels)
 
             optimizer.zero_grad()
@@ -230,7 +230,7 @@ def main():
             if batch_idx % (args.batch_size-1) == 0:
                 pred = torch.round(torch.sigmoid(output))
                 acc = model.accuracy(pred, labels)
-                print('Epoch %2d for SNR %s, shift type %s: loss=%.4f, acc=%.2f' % (epoch, dynamic_snr, args.lpf_shift_type, loss.item(), acc))
+                print('Epoch %2d for SNR %s, shift type %s: loss=%.4f, acc=%.2f' % (epoch, args.snr, args.lpf_shift_type, loss.item(), acc))
                 # loss_list.append(loss.item())
                 # acc_list.append(acc)
 
@@ -259,7 +259,7 @@ def main():
                     test_data = test_data.cuda()
                     test_labels = test_labels.cuda()
                 if epoch % 10 == 0:
-                    val_output = model(test_data, args.snr)
+                    val_output = model(test_data, args.snr, USE_CUDA)
                     val_loss = loss_fn(val_output, test_labels)
                     val_pred = torch.round(torch.sigmoid(val_output))
                     val_acc = model.accuracy(val_pred, test_labels)
