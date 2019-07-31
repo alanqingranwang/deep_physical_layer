@@ -1,3 +1,9 @@
+'''
+Alan Wang, AL29162
+7/31/19
+
+Container class for Pytorch's DataLoader.
+'''
 import torch
 from torch.utils import data
 
@@ -14,7 +20,7 @@ class Dataset(data.Dataset):
     def __getitem__(self, index):
         'Generates one sample of data'
         # Load data and get label
-        X = self.data[index] 
+        X = self.data[index]
         y = self.labels[index]
 
         return X, y
