@@ -166,17 +166,17 @@ def train_channel(batch, batch_idx, epoch, generator, discriminator, channel_use
     fake = Variable(Tensor(batch.size(0), 1).fill_(0.0), requires_grad=False)
 
     # Configure input
-    real_codes = channel(batch, channel_use, snr, cuda)
+    real_codes = channel(batch, channel_use)
 
     # -----------------
     #  Train Generator
     # -----------------
     optimizer_G.zero_grad()
     # Generate a batch of images
-    gen_codes = generator(batch)
+    gen_codes = generator(batch, batch)
 
     # Loss measures generator's ability to fool the discriminator
-    g_loss = adversarial_loss(discriminator(gen_codes), valid)
+    g_loss = adversarial_loss(discriminator(gen_codes, batch), valid)
     g_loss.backward()
     optimizer_G.step()
     # ---------------------
@@ -184,10 +184,10 @@ def train_channel(batch, batch_idx, epoch, generator, discriminator, channel_use
     # ---------------------
     optimizer_D.zero_grad()
     # Measure discriminator's ability to classify real from generated samples
-    real_loss = adversarial_loss(discriminator(real_codes), valid)
-    fake_loss = adversarial_loss(discriminator(gen_codes.detach()), fake)
+    real_loss = adversarial_loss(discriminator(real_codes, batch), valid)
+    fake_loss = adversarial_loss(discriminator(gen_codes.detach(), batch), fake)
     d_loss = (real_loss + fake_loss) / 2
-    d_acc = discriminator.accuracy(real_codes, gen_codes, cuda)
+    d_acc = discriminator.accuracy(real_codes, gen_codes, cuda, batch)
 
     d_loss.backward()
     optimizer_D.step()
@@ -198,8 +198,8 @@ def train_channel(batch, batch_idx, epoch, generator, discriminator, channel_use
 
     return generator, discriminator, optimizer_G, optimizer_D
 
-def train_with_learned_generator(batch, labels, batch_idx, autoencoder, channel_model, loss_fn, optimizer, epoch, snr, cuda):
-    output = autoencoder(batch, epoch, channel_model, snr, cuda)
+def train_with_learned_generator(batch, labels, batch_idx, autoencoder, channel_model, loss_fn, optimizer, epoch, snr, cuda, block_size):
+    output = autoencoder(batch, epoch, channel_model, snr, cuda, block_size)
     loss = loss_fn(output, labels)
     optimizer.zero_grad()
     loss.backward()
@@ -213,8 +213,8 @@ def train_with_learned_generator(batch, labels, batch_idx, autoencoder, channel_
     # print_decoder_weights('RIGHT BEFORE EXITING TRANSMITTER', autoencoder)
     return autoencoder, optimizer, acc
 
-def train_with_channel(batch, labels, batch_idx, autoencoder, loss_fn, optimizer, epoch, snr, cuda):
-    output = autoencoder(batch, epoch, None, snr, cuda)
+def train_with_channel(batch, labels, batch_idx, autoencoder, loss_fn, optimizer, epoch, snr, cuda, block_size):
+    output = autoencoder(batch, epoch, None, snr, cuda, block_size)
     loss = loss_fn(output, labels)
     optimizer.zero_grad()
     loss.backward()
@@ -252,39 +252,29 @@ def main():
     autoencoder_loss = nn.BCEWithLogitsLoss()
     gan_loss = torch.nn.BCELoss()
 
-    # Training
-    # val_loss_list_normal = []
-    # val_acc_list_normal = []
 
-    # autoencoder = Net(channel_use=args.channel_use, block_size=args.block_size, snr=args.snr, use_cuda=cuda, use_lpf=args.use_lpf, use_complex = args.use_complex, lpf_num_taps=args.lpf_num_taps, dropout_rate=args.dropout_rate)
+    autoencoder = Net(channel_use=args.channel_use, block_size=args.block_size, snr=args.snr, use_cuda=cuda, use_lpf=args.use_lpf, use_complex = args.use_complex, lpf_num_taps=args.lpf_num_taps, dropout_rate=args.dropout_rate)
+    autoencoder1 = Net(channel_use=args.channel_use, block_size=args.block_size, snr=args.snr, use_cuda=cuda, use_lpf=args.use_lpf, use_complex = args.use_complex, lpf_num_taps=args.lpf_num_taps, dropout_rate=args.dropout_rate)
 
-    # generator = Generator(args.channel_use)
-    # discriminator = Discriminator(args.channel_use)
+    generator = Generator(args.channel_use, args.block_size)
+    # generator.load_state_dict(torch.load('../models/generator'))
+    # for param in generator.parameters():
+    #     param.requires_grad = False
+
+    discriminator = Discriminator(args.channel_use, args.block_size)
 
     if cuda:
         autoencoder = autoencoder.cuda()
+        autoencoder1 = autoencoder1.cuda()
         generator = generator.cuda()
         discriminator = discriminator.cuda()
         test_data = test_data.cuda()
         test_labels = test_labels.cuda()
 
-
-
-    autoencoder = Net(channel_use=args.channel_use, block_size=args.block_size, snr=args.snr, use_cuda=cuda, use_lpf=args.use_lpf, use_complex = args.use_complex, lpf_num_taps=args.lpf_num_taps, dropout_rate=args.dropout_rate)
-    autoencoder1 = Net(channel_use=args.channel_use, block_size=args.block_size, snr=args.snr, use_cuda=cuda, use_lpf=args.use_lpf, use_complex = args.use_complex, lpf_num_taps=args.lpf_num_taps, dropout_rate=args.dropout_rate)
-
-    generator = Generator(args.channel_use)
-    generator.load_state_dict(torch.load('../models/generator'))
-    for param in generator.parameters():
-        param.requires_grad = False
-
-    # discriminator = Discriminator(args.channel_use)
-
-    # optimizer = Adam(filter(lambda p: p.requires_grad, autoencoder.parameters()), lr=args.lr)
     optimizer = Adam(filter(lambda p: p.requires_grad, autoencoder.parameters()), lr=args.lr)
     optimizer1 = Adam(filter(lambda p: p.requires_grad, autoencoder1.parameters()), lr=args.lr)
-    # optimizer_G = torch.optim.Adam(generator.parameters(), lr=args.lr)
-    # optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=args.lr)
+    optimizer_G = torch.optim.Adam(generator.parameters(), lr=args.lr)
+    optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=args.lr)
 
     learned_acc_list = []
     channel_acc_list = []
@@ -301,11 +291,20 @@ def main():
 
             # autoencoder, optimizer = train_transmitter(batch, labels, batch_idx, autoencoder, generator, autoencoder_loss, optimizer, epoch, args.snr, cuda)
 
-            autoencoder, optimizer, learned_acc = train_with_learned_generator(batch, labels, batch_idx, autoencoder, generator, autoencoder_loss, optimizer, epoch, args.snr, cuda)
-            autoencoder1, optimizer1, channel_acc = train_with_channel(batch, labels, batch_idx, autoencoder1, autoencoder_loss, optimizer1, epoch, args.snr, cuda)
+            autoencoder, optimizer, learned_acc = train_with_learned_generator(batch, labels, batch_idx, autoencoder, generator, autoencoder_loss, optimizer, epoch, args.snr, cuda, args.block_size)
+            autoencoder1, optimizer1, channel_acc = train_with_channel(batch, labels, batch_idx, autoencoder1, autoencoder_loss, optimizer1, epoch, args.snr, cuda, args.block_size)
+            # generator.train()
             learned_acc_list.append(learned_acc)
             channel_acc_list.append(channel_acc)
-            # generator, discriminator, optimizer_G, optimizer_D = train_channel(batch, batch_idx, epoch, generator, discriminator, args.channel_use, gan_loss, optimizer_G, optimizer_D, args.epochs, args.snr, cuda)
+
+            # gen_out = generator(batch)
+            # chan_out = channel(batch, args.channel_use)
+
+            # gen_out = gen_out.norm()
+            # chan_out = chan_out.norm()
+            # learned_acc_list.append(gen_out)
+            # channel_acc_list.append(chan_out)
+            generator, discriminator, optimizer_G, optimizer_D = train_channel(batch, batch_idx, epoch, generator, discriminator, args.channel_use, gan_loss, optimizer_G, optimizer_D, args.epochs, args.snr, cuda)
 
 
             # if epoch % 10 == 0 and batch_idx == 0:
@@ -315,6 +314,7 @@ def main():
     plt.plot(learned_acc_list)
     plt.plot(channel_acc_list)
     plt.savefig('./compare_channels.png')
+    # torch.save(generator.state_dict(), '../models/generator')
 
 if __name__ == "__main__":
     main()

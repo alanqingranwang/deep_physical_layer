@@ -2,7 +2,7 @@ import numpy as np
 from scipy.signal import firwin
 import torch
 
-def channel(codes, channel_use, snr, cuda):
+def channel(codes, channel_use):
     # with torch.no_grad():
     codes = codes.detach().numpy()
     lpf = firwin(channel_use, 0.5)

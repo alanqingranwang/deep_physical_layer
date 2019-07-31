@@ -89,12 +89,12 @@ class Net(nn.Module):
     #         x += noise_clipped
     #     return x, noise_clipped
 
-    def forward(self, x, epoch, channel_model, channel_snr, cuda):
-        x = self.encode(x)
+    def forward(self, x, epoch, channel_model, channel_snr, cuda, block_size):
+        codes = self.encode(x)
         if channel_model == None: # Training receiver, use true channel
-            x = channel(x, self.channel_use, channel_snr, cuda)
+            x = channel(codes, self.channel_use)
         else: # Training transmitter, use generator
-            x = channel_model(x)
+            x = channel_model(codes, x)
 
         x = self.decode(x)
         return x
