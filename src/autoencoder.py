@@ -9,10 +9,10 @@ from torch import nn
 from torch.autograd import Variable
 import numpy as np
 from ComplexLayers import ComplexLinear, ComplexConv
-from channel import channel
+from channel import Channel
 
 class Autoencoder(nn.Module):
-    def __init__(self, channel_use, block_size, snr, use_cuda=True, use_lpf=True, use_complex=False, lpf_num_taps=100, dropout_rate=0):
+    def __init__(self, channel_use, block_size, snr, use_cuda, use_lpf, use_complex, channel_type, lpf_num_taps=100, discrete_jumps=5):
         super(Autoencoder, self).__init__()
         self.channel_use = channel_use
         self.block_size = block_size
@@ -20,6 +20,8 @@ class Autoencoder(nn.Module):
         self.use_cuda = use_cuda
         self.use_lpf = use_lpf
         self.use_complex = use_complex
+        self.channel_type = channel_type
+        self.discrete_jumps = discrete_jumps
 
         if use_lpf:
             dec_hidden_dim = lpf_num_taps + channel_use - 1
@@ -65,15 +67,6 @@ class Autoencoder(nn.Module):
         x = self.channel_use**0.5 * (x / x.norm(dim=1)[:, None])
         return x
 
-    def channel(self, x):
-        snr_lin = 10**(0.1*self.snr)
-        rate = self.block_size / self.channel_use
-
-        noise = torch.randn(*x.size()) * np.sqrt(1/(2 * rate * snr_lin))
-        if self.use_cuda: noise = noise.cuda()
-        x += noise
-        return x
-
     def decode(self, x):
         if self.use_complex:
             x = self.complex_decoder(x)
@@ -81,9 +74,16 @@ class Autoencoder(nn.Module):
             x = self.decoder(x)
         return x
 
-    def forward(self, x, dynamic_snr):
+    def forward(self, x):
         x = self.encode(x)
-        x = self.channel(x)
+
+        channel = Channel(self.snr, self.block_size, self.channel_use, self.use_cuda)
+        if self.channel_type == 'awgn':
+            x = channel.awgn(x)
+        elif self.channel_type == 'time-varying tones':
+            x = channel.time_varying_tones(x, self.discrete_jumps, num_samples=5*self.discrete_jumps, signal_length=x.shape[1])
+        else:
+            raise Exception('Invalid channel type')
         x = self.decode(x)
         return x
 

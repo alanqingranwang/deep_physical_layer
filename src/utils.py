@@ -6,6 +6,8 @@ Various functions for visualizing codes, like producing
 FFTs and constellation plots. Not guaranteed to be stable.
 '''
 import matplotlib.pyplot as plt
+import numpy as np
+import torch
 
 def create_fft_plots(sample, model, epoch):
     train_code = model.encode(sample.view(1, -1))
@@ -26,7 +28,7 @@ def create_fft_plots(sample, model, epoch):
     lowpass_fft = torch.fft(filter_complex, 1, normalized=False).cpu().detach().numpy()
     plt.plot([np.sqrt(lowpass_fft[i, 0]**2 + lowpass_fft[i, 1]**2) for i in range(len(lowpass_fft))])
     plt.title('Epoch ' + str(epoch))
-    plt.savefig('results/images/fft_none/fft_%s.png' % (str(epoch).zfill(4)))
+    plt.savefig('../results/images/fft_none/fft_%s.png' % (str(epoch).zfill(4)))
     fig.clf()
     plt.close()
 
@@ -40,36 +42,40 @@ def create_constellation_plots(sample_data, block_size, channel_use, model, snr,
     plt.scatter(embed[:,0], embed[:,1])
     plt.title('t-SNE Embedding of (%s, %s) Encoding, Epoch %s' % (channel_use, block_size, str(epoch)))
 
-    # # Add noise on top
-    # snr_lin = 10**(0.1*snr)
-    # rate = block_size / channel_use
-    # if use_complex:
-    #     noisiness = np.zeros((100, channel_use*2))
-    # else:
-    #     noisiness = np.zeros((100, channel_use))
-    # for i in range(10):
-    #     noisy_codes = train_codes.clone()
-    #     noise = torch.randn(*noisy_codes.size()) * np.sqrt(1/(2 * rate * snr_lin))
-    #     if use_cuda: noise = noise.cuda()
-    #     noisy_codes += noise
-    #     noisy_codes_cpu = noisy_codes.cpu().detach().numpy()
-    #     noisiness[i] = noisy_codes_cpu
-
-    # colors = itertools.cycle(['g', 'b', 'k', 'c'])
-    # for i in range(channel_use):
-    #     if use_complex:
-    #         plt.scatter(noisiness[:,i], noisiness[:,i+channel_use], s=10, color=next(colors))
-    #     else:
-    #         plt.scatter(noisiness[:,i].real, noisiness[:,i].imag, s=10, color=next(colors))
-
-    # if use_complex:
-    #     plt.scatter(train_codes_cpu[:,0], train_codes_cpu[:,0 + channel_use])
-    #     # for i in range(train_codes_cpu.shape[1] // 2):
-    #     #     plt.scatter(train_codes_cpu[:,i], train_codes_cpu[:,i + channel_use])
-    # else:
-    #     plt.scatter(train_codes_cpu.real, train_codes_cpu.imag, c='r')
     plt.xlim([-500, 500])
     plt.ylim([-500, 500])
-    plt.savefig('results/images/constellation/const_%s_%s.png' % (str(snr).zfill(2), str(epoch).zfill(4)))
+    plt.savefig('../results/images/constellation/const_%s_%s.png' % (str(snr).zfill(2), str(epoch).zfill(4)))
     fig.clf()
     plt.close()
+
+def create_noisytones_fft(hidden, epoch, hidden_dim, discrete_jumps=5):
+    hi = hidden.cpu().detach().numpy()
+    hidden = hi[0]
+
+    L = np.linspace(0, np.pi, num=discrete_jumps)
+    sig = 0
+    for omega in L:
+        t = np.linspace(0, 63, num=hidden_dim)
+        noise_tone = torch.tensor(np.sin(omega * t)).float()
+        sig += noise_tone
+        noise = sig
+        noise = noise.detach().numpy()
+        hidden_zp = np.zeros(200)
+        noise_zp = np.zeros(200)
+        hidden_zp[:len(hidden)] = hidden
+        noise_zp[:len(noise)] = noise
+
+        H = np.fft.fft(hidden_zp) / len(hidden_zp)
+        N = np.fft.fft(noise_zp) / len(noise_zp)
+        fig = plt.figure()
+        plt.plot([np.abs(H[i]) for i in range(len(H))])
+        plt.plot([np.abs(N[i]) for i in range(len(N))])
+        plt.title('RNN (32, 4), Epoch %s' % str(epoch))
+        legend_strings = []
+        legend_strings.append('Encoded Signal')
+        legend_strings.append('Time-Varying Noise Tones, Superimposed')
+        plt.legend(legend_strings, loc = 'upper right')
+        plt.ylim([0, 0.2]) #
+        plt.savefig('../results/images/rnn_pics/pics' + str(epoch).zfill(4))
+        plt.close()
+        fig.clf()

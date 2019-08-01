@@ -8,11 +8,8 @@ import imageio
 import matplotlib.pyplot as plt
 import os
 import glob
-import itertools
-import torch
-from experimental import Net
 
-AWGN_PATH = '../awgn_pics/'
+AWGN_PATH = '../results/images/rnn_pics/'
 awgn_images = []
 
 files = glob.glob(AWGN_PATH + '*.png')
@@ -20,4 +17,4 @@ files = sorted(files)
 print(files)
 for filename in files:
     awgn_images.append(imageio.imread(filename))
-imageio.mimsave('./results/gifs/awgn.gif', awgn_images)
+imageio.mimsave('../results/gifs/awgn.gif', awgn_images)
