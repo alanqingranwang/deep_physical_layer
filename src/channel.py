@@ -2,18 +2,18 @@ import torch
 import numpy as np
 
 class Channel():
-    def __init__(self, snr, block_size, channel_use, use_cuda):
+    def __init__(self, snr, block_size, channel_use, cuda):
         self.snr = snr
         self.block_size = block_size
         self.channel_use = channel_use
-        self.use_cuda = use_cuda
+        self.cuda = cuda
 
     def awgn(self, x):
         snr_lin = 10**(0.1*self.snr)
         rate = self.block_size / self.channel_use
 
         noise = torch.randn(*x.size()) * (1/(2 * rate * snr_lin))**0.5
-        if self.use_cuda: noise = noise.cuda()
+        noise = noise.to(self.cuda)
         x = x + noise
         return x
 
@@ -39,7 +39,6 @@ class Channel():
             noise_convolved = torch.tensor(noise_convolved).float()
             res[i] = noise_convolved.view(1, -1)
 
-        if self.use_cuda:
-            res = res.cuda()
+        res.to(self.cuda)
         x = x + res
         return x

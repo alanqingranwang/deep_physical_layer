@@ -12,12 +12,12 @@ from ComplexLayers import ComplexLinear, ComplexConv
 from channel import Channel
 
 class Autoencoder(nn.Module):
-    def __init__(self, channel_use, block_size, snr, use_cuda, use_lpf, use_complex, channel_type, lpf_num_taps=100, discrete_jumps=5):
+    def __init__(self, channel_use, block_size, snr, cuda, use_lpf, use_complex, channel_type, lpf_num_taps=100, discrete_jumps=5):
         super(Autoencoder, self).__init__()
         self.channel_use = channel_use
         self.block_size = block_size
         self.snr = snr
-        self.use_cuda = use_cuda
+        self.cuda = cuda
         self.use_lpf = use_lpf
         self.use_complex = use_complex
         self.channel_type = channel_type
@@ -77,7 +77,7 @@ class Autoencoder(nn.Module):
     def forward(self, x):
         x = self.encode(x)
 
-        channel = Channel(self.snr, self.block_size, self.channel_use, self.use_cuda)
+        channel = Channel(self.snr, self.block_size, self.channel_use, self.cuda)
         if self.channel_type == 'awgn':
             x = channel.awgn(x)
         elif self.channel_type == 'time-varying tones':

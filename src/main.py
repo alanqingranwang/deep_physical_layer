@@ -83,8 +83,9 @@ def main():
 
     pprint.pprint(vars(args))
 
-    USE_CUDA = torch.cuda.is_available()
     train_data, train_labels, test_data, test_labels = generate_data(args.block_size, args.use_complex)
+    test_data = test_data.to(args.device)
+    test_labels = test_labels.to(args.device)
     if not args.use_autoencoder:
         train_data = train_data.unsqueeze(1)
         train_labels = train_labels.unsqueeze(1)
@@ -100,14 +101,11 @@ def main():
     loss_fn = nn.BCEWithLogitsLoss()
 
     if args.use_autoencoder:
-        model = Autoencoder(channel_use=args.channel_use, block_size=args.block_size, snr=args.snr, use_cuda=USE_CUDA, use_lpf=args.use_lpf, use_complex = args.use_complex, channel_type=args.channel_type)
+        model = Autoencoder(channel_use=args.channel_use, block_size=args.block_size, snr=args.snr, cuda=args.device, use_lpf=args.use_lpf, use_complex = args.use_complex, channel_type=args.channel_type)
     else:
-        model = RNN(channel_use=args.channel_use, block_size=args.block_size, n_layers=1, snr=args.snr, num_taps=args.lpf_num_taps, use_cuda=USE_CUDA, channel_type=args.channel_type)
+        model = RNN(channel_use=args.channel_use, block_size=args.block_size, n_layers=1, snr=args.snr, num_taps=args.lpf_num_taps, cuda=args.device, channel_type=args.channel_type)
 
-    if USE_CUDA:
-        model = model.cuda()
-        test_data = test_data.cuda()
-        test_labels = test_labels.cuda()
+    model = model.to(args.device)
 
     optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
 
@@ -126,10 +124,8 @@ def main():
 
         model.train()
         for batch_idx, (batch, labels) in tqdm(enumerate(training_loader), total=int(training_set.__len__()/args.batch_size)):
-            hidden = None
-            if USE_CUDA:
-                batch = batch.cuda()
-                labels = labels.cuda()
+            batch = batch.to(args.device)
+            labels = labels.to(args.device)
             if args.use_autoencoder:
                 output = model(batch)
             else:
@@ -144,10 +140,6 @@ def main():
                 pred = torch.round(torch.sigmoid(output))
                 acc = model.accuracy(pred, labels)
                 print('Epoch %2d for SNR %s, shift type %s: loss=%.4f, acc=%.2f' % (epoch, args.snr, args.lpf_shift_type, loss.item(), acc))
-                # model.eval()
-                # sample = torch.zeros(args.block_size).view(1, -1).cuda()
-                # create_noisytones_fft(model.encode(sample), epoch, args.channel_use)
-                # model.train()
 
         # Validation
         model.eval()
